@@ -1,0 +1,159 @@
+{% extends "store/base.html" %}
+{% load static %}
+
+{% block content %}
+<div class="flex justify-between items-center mb-6">
+  <h1 class="text-3xl font-bold">Fresh Produce</h1>
+  {% if not show_oos %}
+    {% if has_oos %}
+      <a href="{% url 'store:catalogue' %}?oos=1" class="text-blue-600 underline">
+        Show out-of-stock
+      </a>
+    {% else %}
+      <span class="text-gray-400 cursor-not-allowed">Show out-of-stock</span>
+    {% endif %}
+  {% else %}
+    <a href="{% url 'store:catalogue' %}" class="text-blue-600 underline">
+      Hide out-of-stock
+    </a>
+  {% endif %}
+</div>
+
+{% for category in categories %}
+  <h2 class="text-2xl font-semibold mt-10 mb-4">{{ category.name }}</h2>
+  {% if category.description %}
+    <p class="mb-4 text-gray-600">{{ category.description }}</p>
+  {% endif %}
+
+  <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+    {% for product in category.visible_products %}
+      {% with rem=product.remaining|floatformat:"0" %}
+      <div id="prod-{{ product.id }}"
+           class="rounded-lg shadow p-4 text-center {% if rem == '0' %}bg-gray-200 text-gray-500{% endif %}">
+
+        {% with imgs=product.images.all %}
+          {% if imgs %}
+            <div x-data="{ src: '{{ imgs.0.image.url }}' }"
+                 class="flex flex-col items-center mb-3">
+              <img :src="src"
+                   class="rounded h-44 object-cover {% if rem == '0' %}opacity-50{% endif %}">
+              {% if imgs|length > 1 %}
+                <div class="flex gap-2 mt-2">
+                  {% for pic in imgs %}
+                    <img src="{{ pic.image.url }}"
+                         class="w-16 h-16 rounded cursor-pointer border hover:ring-2 hover:ring-green-500"
+                         @click="src='{{ pic.image.url }}'">
+                  {% endfor %}
+                </div>
+              {% endif %}
+            </div>
+          {% endif %}
+        {% endwith %}
+
+        <h3 class="font-bold mb-1">{{ product.name }}</h3>
+
+        <p class="text-lg font-semibold mb-1">
+          ${{ product.price|floatformat:"2" }}
+          {% if product.unit == 'ea' %}
+            each
+          {% elif product.unit == 'lb' %}
+            /lb
+          {% elif product.unit == 'oz' %}
+            /oz
+          {% elif product.unit == 'kg' %}
+            /kg
+          {% endif %}
+        </p>
+
+        {% if product.in_cart > 0 %}
+          <p class="text-sm text-gray-600 mb-2">
+            In cart: {{ product.in_cart|floatformat:"0.##" }}
+          </p>
+        {% endif %}
+
+        <p class="text-sm mb-4">
+          Remaining: <span class="remain">{{ rem }}</span>
+          {% if product.unit != 'ea' and rem != '0' %}
+            {{ product.get_price_unit_display }}
+          {% endif %}
+        </p>
+
+        {% if rem != '0' %}
+          <form class="add-form flex items-center justify-center gap-2"
+                data-pid="{{ product.id }}"
+                action="{% url 'store:add_to_cart' product.id %}"
+                method="post">
+            {% csrf_token %}
+            {% if product.unit == 'ea' or product.unit == 'oz' %}
+              <input type="number" name="qty" value="1"
+                     min="1" step="1" max="{{ rem }}"
+                     class="border rounded w-20 p-1 text-center js-qty">
+            {% else %}
+              <select name="qty" class="border rounded p-1 js-qty">
+                {% for w in weight_choices %}
+                  {% if w <= product.remaining %}
+                    <option value="{{ w }}">{{ w }}</option>
+                  {% endif %}
+                {% endfor %}
+              </select>
+            {% endif %}
+            <button class="bg-green-600 hover:bg-green-700 text-white px-4 py-1 rounded">
+              Add
+            </button>
+          </form>
+        {% endif %}
+      </div>
+      {% endwith %}
+    {% endfor %}
+  </div>
+{% endfor %}
+
+{# ─────────────────── AJAX add-to-cart (no page reload) ─────────────────── #}
+<script>
+  // helper to read csrftoken from cookie
+  function getCSRF() {
+    return document.cookie.split('; ')
+      .find(c => c.startsWith('csrftoken='))
+      ?.split('=')[1];
+  }
+
+  document.querySelectorAll('.add-form').forEach(form => {
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const pid = form.dataset.pid;
+      const data = new FormData(form);
+
+      fetch(form.action, {
+        method: 'POST',
+        headers: {
+          'X-CSRFToken': getCSRF(),
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: data
+      })
+      .then(r => r.json())
+      .then(js => {
+        if (!js.ok) return;
+        const card = document.getElementById('prod-' + pid);
+        // Update remaining
+        const remEl = card.querySelector('.remain');
+        if (remEl) remEl.textContent = js.remaining;
+        // Disable if sold out
+        if (js.remaining === '0') {
+          form.remove();
+          const out = document.createElement('p');
+          out.className = 'text-red-600 font-semibold mt-3';
+          out.innerText = 'Out of stock';
+          card.appendChild(out);
+          card.classList.add('bg-gray-200','text-gray-500');
+        } else {
+          form.querySelector('[name=qty]').max = js.remaining;
+        }
+        // Update navbar counter
+        const counter = document.getElementById('cart-count');
+        if (counter) counter.textContent = js.cart_total;
+      });
+    });
+  });
+</script>
+{% endblock %}

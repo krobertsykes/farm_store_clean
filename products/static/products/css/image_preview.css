@@ -1,0 +1,6 @@
+img.preview-target {     /* matches the inline JS */
+  height: 60px;
+  max-width: 80px;
+  border-radius: 4px;
+  object-fit: cover;
+}

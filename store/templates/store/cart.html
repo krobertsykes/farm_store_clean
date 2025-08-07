@@ -1,0 +1,128 @@
+{% extends "store/base.html" %}
+{% load static %}
+
+{% block content %}
+<h1 class="text-3xl font-bold mb-6">Your Cart</h1>
+
+{% if not items %}
+  <p>Your cart is empty.</p>
+  <a href="{% url 'store:catalogue' %}" class="text-blue-600 underline">
+    Continue shopping
+  </a>
+{% else %}
+  <table class="w-full text-left mb-8" id="cart-form">
+    <thead>
+      <tr class="border-b font-semibold">
+        <th>Product</th>
+        <th>Image</th>
+        <th>Unit price</th>
+        <th>Remaining</th>
+        <th>Qty</th>
+        <th>Line&nbsp;total</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for it in items %}
+        {% with p=it.product %}
+        <tr class="border-b" data-id="{{ p.id }}">
+          <td class="py-2">{{ p.name }}</td>
+          <td class="py-2">
+            {% if p.images.all %}
+              <img src="{{ p.images.all.0.image.url }}"
+                   class="rounded" style="width:60px; height:auto;">
+            {% else %}
+              &ndash;
+            {% endif %}
+          </td>
+          <td class="py-2">
+            ${{ p.price|floatformat:"2" }}{% if p.unit == 'ea' %} each{% elif p.unit == 'lb' %}/lb{% elif p.unit == 'oz' %}/oz{% elif p.unit == 'kg' %}/kg{% endif %}
+          </td>
+          <td class="py-2"><span class="remain">{{ it.remaining }}</span></td>
+          <td class="py-2">
+            <!-- max is now total stock, not remaining -->
+            <input type="number"
+                   name="qty"
+                   value="{{ it.qty }}"
+                   min="0"
+                   max="{{ p.stock_qty }}"
+                   {% if p.unit == 'ea' %}step="1"{% else %}step="0.25"{% endif %}
+                   class="border w-20 p-1 rounded qty-input">
+          </td>
+          <td class="py-2 line-total">${{ it.line_total|floatformat:"2" }}</td>
+          <td class="py-2">
+            <form action="{% url 'store:remove_from_cart' p.id %}" method="post">
+              {% csrf_token %}
+              <button class="text-red-600">✕</button>
+            </form>
+          </td>
+        </tr>
+        {% endwith %}
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="text-right text-xl font-semibold mb-8">
+    Total: $<span id="cart-total">{{ total|floatformat:"2" }}</span>
+  </div>
+
+  <a href="{% url 'store:catalogue' %}" class="text-blue-600 underline">
+    Continue shopping
+  </a>
+{% endif %}
+
+<script>
+  // helper to read CSRF token
+  function getCookie(name) {
+    return document.cookie.split('; ')
+      .find(c => c.startsWith(name + '='))
+      ?.split('=')[1];
+  }
+
+  // live‐update qty + remaining + line total + cart total
+  document.querySelectorAll(".qty-input").forEach(inp => {
+    let timer = null;
+
+    inp.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        // parse & clamp to total stock
+        let val = parseFloat(inp.value) || 0;
+        const max = parseFloat(inp.max);
+        if (val > max) val = max;
+        inp.value = val;
+
+        const tr = inp.closest("tr");
+        const id = tr.dataset.id;
+
+        fetch(`/cart/update/${id}/`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "X-CSRFToken": getCookie("csrftoken"),
+            "X-Requested-With": "XMLHttpRequest"
+          },
+          body: `qty=${val}`
+        })
+        .then(r => r.json())
+        .then(js => {
+          if (!js.ok) return;
+
+          // update remaining (stock – cart qty)
+          tr.querySelector(".remain").textContent = js.remaining;
+
+          // recalc line total from price cell
+          const priceCell = tr.querySelector("td:nth-child(3)").textContent;
+          const price = parseFloat(priceCell.replace(/[^0-9.]/g, ""));
+          tr.querySelector(".line-total")
+            .textContent = `$${(price * val).toFixed(2)}`;
+
+          // update cart total in navbar
+          document.getElementById("cart-total")
+            .textContent = js.cart_total;
+        });
+      }, 300);
+    });
+  });
+</script>
+{% endblock %}
