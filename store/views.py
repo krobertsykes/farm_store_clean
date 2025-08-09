@@ -22,45 +22,69 @@ class CatalogueView(ListView):
         return Category.objects.prefetch_related("products__images").all()
 
     def get_context_data(self, **kwargs):
-        ctx      = super().get_context_data(**kwargs)
-        show_oos = self.request.GET.get("oos") == "1"
-        cart     = _cart(self.request.session)
+        ctx    = super().get_context_data(**kwargs)
+        sess   = self.request.session
+        cart   = _cart(sess)
 
-        # 1) Detect if any product is currently out of stock
+        # 0) Detect if any product is shelf‑OOS (independent of this user's cart)
         has_oos = False
         for cat in ctx["categories"]:
             for p in cat.products.all():
-                rem = p.stock_qty - Decimal(cart.get(str(p.pk), "0"))
-                if rem <= 0:
+                if p.stock_qty <= 0:
                     has_oos = True
                     break
             if has_oos:
                 break
 
-        # 2) Build each category’s visible_products list
+        # 1) Persist the Show/Hide OOS toggle in session.
+        #    Only allow True if there actually is shelf‑OOS.
+        oos_param = self.request.GET.get("oos")
+        if oos_param is not None:
+            desired = (oos_param == "1")
+            show_oos = desired and has_oos
+            sess["show_oos"] = show_oos
+        else:
+            show_oos = bool(sess.get("show_oos", False)) and has_oos
+
+        # 2) Track which products were ever in stock for this user
+        ever_in_stock = set(sess.get("ever_in_stock", []))
+
+        # 3) Build each category’s visible_products list
         for cat in ctx["categories"]:
-            prods = list(cat.products.all())
-            if not show_oos:
-                prods = [
-                    p for p in prods
-                    if (p.stock_qty - Decimal(cart.get(str(p.pk), "0"))) > 0
-                ]
-            for p in prods:
-                in_cart     = Decimal(cart.get(str(p.pk), "0"))
-                remaining   = max(p.stock_qty - in_cart, Decimal("0"))
+            visible = []
+            for p in cat.products.all():
+                in_cart   = Decimal(cart.get(str(p.pk), "0"))
+                remaining = max(p.stock_qty - in_cart, Decimal("0"))
+
+                # annotate for template
                 p.in_cart   = in_cart
                 p.remaining = remaining
-            cat.visible_products = prods
+
+                # once a product has shelf stock, remember it for this user
+                if p.stock_qty > 0:
+                    ever_in_stock.add(p.pk)
+
+                # Visibility rules:
+                # - If show_oos: show everything
+                # - Else: show if remaining > 0, OR user has some in cart, OR it was ever in stock for this user
+                if show_oos or remaining > 0 or in_cart > 0 or (p.pk in ever_in_stock):
+                    visible.append(p)
+
+            cat.visible_products = visible
+
+        # persist and finish context
+        sess["ever_in_stock"] = list(ever_in_stock)
+        sess.modified = True
 
         ctx.update({
             "show_oos":        show_oos,
-            "has_oos":         has_oos,
+            "has_oos":         has_oos,  # shelf‑OOS only
             "weight_choices":  [
                 Decimal("0.25"), Decimal("0.5"),
                 Decimal("1"),    Decimal("2"),
                 Decimal("5")
             ],
-            "cart_item_total": _cart_total_items(self.request.session),
+            "cart_item_total": _cart_total_items(sess),
         })
         return ctx
 
@@ -86,12 +110,13 @@ def add_to_cart(request, pk):
         request.session.modified = True
 
     if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-        remaining = max(product.stock_qty - Decimal(cart[str(pk)]), Decimal("0"))
+        new_abs   = Decimal(cart.get(str(pk), "0"))
+        remaining = max(product.stock_qty - new_abs, Decimal("0"))
         total_qty = _cart_total_items(request.session)
         return JsonResponse({
             "ok":         True,
             "remaining":  str(remaining),
-            "in_cart":    cart[str(pk)],
+            "in_cart":    str(new_abs),
             "cart_total": str(total_qty),
         })
 
@@ -118,10 +143,12 @@ def update_qty(request, pk):
 
     if qty <= 0:
         cart.pop(str(pk), None)
+        new_abs  = Decimal("0")
         remaining = product.stock_qty
     else:
         qty = min(qty, product.stock_qty)
         cart[str(pk)] = str(qty)
+        new_abs  = qty
         remaining = max(product.stock_qty - qty, Decimal("0"))
 
     request.session.modified = True
@@ -130,6 +157,7 @@ def update_qty(request, pk):
     return JsonResponse({
         "ok":         True,
         "remaining":  str(remaining),
+        "in_cart":    str(new_abs),
         "cart_total": str(total_qty),
     })
 
@@ -144,10 +172,10 @@ class CartView(View):
 
         items, total = [], Decimal("0")
         for p in products:
-            qty      = Decimal(cart[str(p.pk)])
-            remaining= max(p.stock_qty - qty, Decimal("0"))
-            line_tot = p.price * qty
-            total   += line_tot
+            qty       = Decimal(cart[str(p.pk)])
+            remaining = max(p.stock_qty - qty, Decimal("0"))
+            line_tot  = p.price * qty
+            total    += line_tot
             items.append({
                 "product":    p,
                 "qty":        qty,

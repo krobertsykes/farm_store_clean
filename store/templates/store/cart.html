@@ -36,17 +36,33 @@
             {% endif %}
           </td>
           <td class="py-2">
-            ${{ p.price|floatformat:"2" }}{% if p.unit == 'ea' %} each{% elif p.unit == 'lb' %}/lb{% elif p.unit == 'oz' %}/oz{% elif p.unit == 'kg' %}/kg{% endif %}
+            ${{ p.price|floatformat:"2" }}
+            {% if p.unit == 'ea' %}
+              each
+            {% elif p.unit == 'lb' %}
+              per pound
+            {% elif p.unit == 'oz' %}
+              per ounce
+            {% elif p.unit == 'kg' %}
+              per kilogram
+            {% endif %}
           </td>
           <td class="py-2"><span class="remain">{{ it.remaining }}</span></td>
           <td class="py-2">
-            <!-- max is now total stock, not remaining -->
             <input type="number"
                    name="qty"
                    value="{{ it.qty }}"
                    min="0"
                    max="{{ p.stock_qty }}"
-                   {% if p.unit == 'ea' %}step="1"{% else %}step="0.25"{% endif %}
+                   {% if p.unit == 'ea' %}
+                     step="1"
+                   {% elif p.unit == 'lb' %}
+                     step="0.5"
+                   {% elif p.unit == 'oz' %}
+                     step="1"
+                   {% else %}
+                     step="0.25"
+                   {% endif %}
                    class="border w-20 p-1 rounded qty-input">
           </td>
           <td class="py-2 line-total">${{ it.line_total|floatformat:"2" }}</td>
@@ -72,57 +88,46 @@
 {% endif %}
 
 <script>
-  // helper to read CSRF token
-  function getCookie(name) {
-    return document.cookie.split('; ')
-      .find(c => c.startsWith(name + '='))
-      ?.split('=')[1];
-  }
+function getCookie(name) {
+  return document.cookie.split('; ').find(c => c.startsWith(name + '='))
+    ?.split('=')[1];
+}
 
-  // live‐update qty + remaining + line total + cart total
-  document.querySelectorAll(".qty-input").forEach(inp => {
-    let timer = null;
+document.querySelectorAll(".qty-input").forEach(inp => {
+  let timer = null;
+  inp.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      let val = parseFloat(inp.value) || 0;
+      const max = parseFloat(inp.max);
+      if (val > max) val = max;
+      inp.value = val;
 
-    inp.addEventListener("input", () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        // parse & clamp to total stock
-        let val = parseFloat(inp.value) || 0;
-        const max = parseFloat(inp.max);
-        if (val > max) val = max;
-        inp.value = val;
+      const tr = inp.closest("tr");
+      const id = tr.dataset.id;
 
-        const tr = inp.closest("tr");
-        const id = tr.dataset.id;
-
-        fetch(`/cart/update/${id}/`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "X-CSRFToken": getCookie("csrftoken"),
-            "X-Requested-With": "XMLHttpRequest"
-          },
-          body: `qty=${val}`
-        })
-        .then(r => r.json())
-        .then(js => {
-          if (!js.ok) return;
-
-          // update remaining (stock – cart qty)
-          tr.querySelector(".remain").textContent = js.remaining;
-
-          // recalc line total from price cell
-          const priceCell = tr.querySelector("td:nth-child(3)").textContent;
-          const price = parseFloat(priceCell.replace(/[^0-9.]/g, ""));
-          tr.querySelector(".line-total")
-            .textContent = `$${(price * val).toFixed(2)}`;
-
-          // update cart total in navbar
-          document.getElementById("cart-total")
-            .textContent = js.cart_total;
-        });
-      }, 300);
-    });
+      fetch(`/cart/update/${id}/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "X-CSRFToken": getCookie("csrftoken"),
+          "X-Requested-With": "XMLHttpRequest"
+        },
+        body: `qty=${val}`
+      })
+      .then(r => r.json())
+      .then(js => {
+        if (!js.ok) return;
+        tr.querySelector(".remain").textContent = js.remaining;
+        const priceCell = tr.querySelector("td:nth-child(3)").textContent;
+        const price = parseFloat(priceCell.replace(/[^0-9.]/g, ""));
+        tr.querySelector(".line-total")
+          .textContent = `$${(price * val).toFixed(2)}`;
+        document.getElementById("cart-total")
+          .textContent = js.cart_total;
+      });
+    }, 300);
   });
+});
 </script>
 {% endblock %}

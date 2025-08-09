@@ -8,16 +8,12 @@
   <h1 class="text-3xl font-bold">Fresh Produce</h1>
   {% if not show_oos %}
     {% if has_oos %}
-      <a href="{% url 'store:catalogue' %}?oos=1" class="text-blue-600 underline">
-        Show out-of-stock
-      </a>
+      <a href="{% url 'store:catalogue' %}?oos=1" class="text-blue-600 underline">Show out-of-stock</a>
     {% else %}
       <span class="text-gray-400 cursor-not-allowed">Show out-of-stock</span>
     {% endif %}
   {% else %}
-    <a href="{% url 'store:catalogue' %}" class="text-blue-600 underline">
-      Hide out-of-stock
-    </a>
+    <a href="{% url 'store:catalogue' %}?oos=0" class="text-blue-600 underline">Hide out-of-stock</a>
   {% endif %}
 </div>
 
@@ -31,14 +27,12 @@
     {% for product in category.visible_products %}
       {% with rem=product.remaining|floatformat:"0" %}
       <div id="prod-{{ product.id }}"
-           class="rounded-lg shadow p-4 text-center {% if rem == '0' %}bg-gray-200 text-gray-500{% endif %}">
+           class="rounded-lg shadow p-4 text-center {% if rem == '0' and not product.in_cart %}bg-gray-200 text-gray-500{% endif %}">
 
         {% with imgs=product.images.all %}
           {% if imgs %}
-            <div x-data="{ src: '{{ imgs.0.image.url }}' }"
-                 class="flex flex-col items-center mb-3">
-              <img :src="src"
-                   class="rounded h-44 object-cover {% if rem == '0' %}opacity-50{% endif %}">
+            <div x-data="{ src: '{{ imgs.0.image.url }}' }" class="flex flex-col items-center mb-3">
+              <img :src="src" class="rounded h-44 object-cover {% if rem == '0' and not product.in_cart %}opacity-50{% endif %}">
               {% if imgs|length > 1 %}
                 <div class="flex gap-2 mt-2">
                   {% for pic in imgs %}
@@ -56,53 +50,71 @@
 
         <p class="text-lg font-semibold mb-1">
           ${{ product.price|floatformat:"2" }}
-          {% if product.unit == 'ea' %}
-            each
-          {% elif product.unit == 'lb' %}
-            /lb
-          {% elif product.unit == 'oz' %}
-            /oz
-          {% elif product.unit == 'kg' %}
-            /kg
-          {% endif %}
+          {% if product.unit == 'ea' %}each{% elif product.unit == 'lb' %} per pound{% elif product.unit == 'oz' %} per ounce{% elif product.unit == 'kg' %}/kg{% endif %}
         </p>
-
-        {% if product.in_cart > 0 %}
-          <p class="text-sm text-gray-600 mb-2">
-            In cart: {{ product.in_cart|floatformat:"0.##" }}
-          </p>
-        {% endif %}
 
         <p class="text-sm mb-4">
           Remaining: <span class="remain">{{ rem }}</span>
-          {% if product.unit != 'ea' and rem != '0' %}
-            {{ product.get_price_unit_display }}
-          {% endif %}
+          {% if product.unit != 'ea' and rem != '0' %}{{ product.get_price_unit_display }}{% endif %}
         </p>
 
-        {% if rem != '0' %}
-          <form class="add-form flex items-center justify-center gap-2"
-                data-pid="{{ product.id }}"
-                action="{% url 'store:add_to_cart' product.id %}"
-                method="post">
-            {% csrf_token %}
-            {% if product.unit == 'ea' or product.unit == 'oz' %}
-              <input type="number" name="qty" value="1"
-                     min="1" step="1" max="{{ rem }}"
-                     class="border rounded w-20 p-1 text-center js-qty">
-            {% else %}
-              <select name="qty" class="border rounded p-1 js-qty">
-                {% for w in weight_choices %}
-                  {% if w <= product.remaining %}
-                    <option value="{{ w }}">{{ w }}</option>
-                  {% endif %}
-                {% endfor %}
-              </select>
-            {% endif %}
-            <button class="bg-green-600 hover:bg-green-700 text-white px-4 py-1 rounded">
-              Add
-            </button>
-          </form>
+        {# IMPORTANT: keep controls visible if user has some in cart, even when remaining == 0 #}
+        {% if rem != '0' or product.in_cart > 0 %}
+        <form class="add-form relative flex items-center justify-center gap-2"
+              data-pid="{{ product.id }}"
+              data-unit="{{ product.unit }}"
+              data-initial-in-cart="{{ product.in_cart|default:0 }}"
+              data-price="{{ product.price }}"
+              data-url-update="{% url 'store:update_qty' product.id %}"
+              method="post">
+          {% csrf_token %}
+
+          <!-- Yellow Circular Plus Sign -->
+          <button type="button"
+                  class="ycps w-10 h-10 rounded-full bg-yellow-400 hover:bg-yellow-500 active:bg-yellow-600 text-black text-xl font-bold flex items-center justify-center shadow border border-yellow-500"
+                  aria-label="Add to cart">+</button>
+
+          <!-- Stepper for unit='ea' -->
+          {% if product.unit == 'ea' %}
+          <div class="stepper hidden items-center gap-3 px-3 py-1 rounded-full border border-yellow-400 bg-yellow-100">
+            <button type="button" class="btn-dec text-2xl leading-none px-2">−</button>
+            <span class="stepper-count min-w-6 text-lg font-semibold text-black text-center">1</span>
+            <button type="button" class="btn-inc text-2xl leading-none px-2">+</button>
+          </div>
+          {% endif %}
+
+          {% if product.unit != 'ea' %}
+            <!-- Amazon‑y pill once something's chosen (one line) -->
+            <div class="weight-stepper hidden flex items-center gap-2 px-3 py-1 rounded-full border border-yellow-400 bg-yellow-100 whitespace-nowrap">
+              <button type="button" class="wdec text-2xl leading-none px-2">−</button>
+              <span class="wqty min-w-12 text-center font-semibold">0</span>
+              <span class="wunit text-sm"></span>
+              <!-- caret opens full absolute list -->
+              <button type="button" class="wcaret px-1" title="Change amount">
+                <svg class="w-4 h-4 opacity-60" viewBox="0 0 20 20" fill="currentColor"><path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"/></svg>
+              </button>
+              <button type="button" class="winc text-2xl leading-none px-2">+</button>
+            </div>
+
+            <!-- Listbox (opens after YCPS or caret) -->
+            <div class="weight-panel hidden absolute top-full mt-2 left-1/2 -translate-x-1/2 z-30 bg-white border rounded shadow-lg w-48 text-left">
+              <!-- rows injected via JS -->
+            </div>
+
+            <!-- Confirm card (used only for first add from YCPS) -->
+            <div class="weight-confirm hidden absolute top-full mt-2 left-1/2 -translate-x-1/2 z-20 bg-white border rounded shadow-lg p-3 w-64 text-left">
+              <div class="mb-2">
+                <span class="font-medium">Qty:</span>
+                <span class="chosen font-semibold"></span>
+              </div>
+              <div class="text-sm text-gray-700 mb-3">
+                Total est. price: <span class="est-price font-semibold"></span><br>
+                <span class="text-gray-500">Final cost by actual weight</span>
+              </div>
+              <button type="button" class="btn-add w-full rounded-full bg-yellow-400 hover:bg-yellow-500 active:bg-yellow-600 text-black font-semibold py-2">Add to Cart</button>
+            </div>
+          {% endif %}
+        </form>
         {% endif %}
       </div>
       {% endwith %}
@@ -110,52 +122,274 @@
   </div>
 {% endfor %}
 
-{# ─────────────────── AJAX add-to-cart (no page reload) ─────────────────── #}
 <script>
-  // helper to read csrftoken from cookie
-  function getCSRF() {
-    return document.cookie.split('; ')
-      .find(c => c.startsWith('csrftoken='))
-      ?.split('=')[1];
+  function getCSRF(){
+    return document.cookie.split('; ').find(c=>c.startsWith('csrftoken='))?.split('=')[1]
+  }
+  function postUpdateQty(url,qty){
+    const data=new FormData(); data.append('qty',String(qty));
+    return fetch(url,{
+      method:'POST',
+      headers:{'X-CSRFToken':getCSRF(),'X-Requested-With':'XMLHttpRequest'},
+      body:data
+    }).then(r=>r.json());
   }
 
-  document.querySelectorAll('.add-form').forEach(form => {
-    form.addEventListener('submit', e => {
-      e.preventDefault();
-      const pid = form.dataset.pid;
-      const data = new FormData(form);
+  document.querySelectorAll('.add-form').forEach(form=>{
+    const pid   = form.dataset.pid;
+    const unit  = form.dataset.unit;           // 'ea' | 'lb' | 'oz' | 'kg'
+    const price = Number(form.dataset.price||'0');
+    const url   = form.dataset.urlUpdate;
+    let inCart  = Number(form.dataset.initialInCart||'0');
 
-      fetch(form.action, {
-        method: 'POST',
-        headers: {
-          'X-CSRFToken': getCSRF(),
-          'X-Requested-With': 'XMLHttpRequest'
-        },
-        body: data
-      })
-      .then(r => r.json())
-      .then(js => {
-        if (!js.ok) return;
-        const card = document.getElementById('prod-' + pid);
-        // Update remaining
-        const remEl = card.querySelector('.remain');
-        if (remEl) remEl.textContent = js.remaining;
-        // Disable if sold out
-        if (js.remaining === '0') {
-          form.remove();
-          const out = document.createElement('p');
-          out.className = 'text-red-600 font-semibold mt-3';
-          out.innerText = 'Out of stock';
-          card.appendChild(out);
-          card.classList.add('bg-gray-200','text-gray-500');
+    const card     = document.getElementById('prod-'+pid);
+    const remainEl = card.querySelector('.remain');
+
+    const ycps   = form.querySelector('.ycps');
+    const stepEl = form.querySelector('.stepper');
+    const inc    = form.querySelector('.btn-inc');
+    const dec    = form.querySelector('.btn-dec');
+    const countEl= form.querySelector('.stepper-count');
+
+    const wStep  = form.querySelector('.weight-stepper');
+    const winc   = wStep ? wStep.querySelector('.winc') : null;
+    const wdec   = wStep ? wStep.querySelector('.wdec') : null;
+    const wqty   = wStep ? wStep.querySelector('.wqty') : null;
+    const wunit  = wStep ? wStep.querySelector('.wunit') : null;
+    const wcaret = wStep ? wStep.querySelector('.wcaret') : null;
+
+    const panel  = form.querySelector('.weight-panel');
+    const confirm= form.querySelector('.weight-confirm');
+    const chosen = confirm ? confirm.querySelector('.chosen') : null;
+    const est    = confirm ? confirm.querySelector('.est-price') : null;
+    const addBtn = confirm ? confirm.querySelector('.btn-add') : null;
+
+    let pickToAdd = 0; // for initial add flow
+
+    // Helpers
+    function rem(){ return Number((remainEl?.textContent||'0').replace(/[^\d.]/g,'')) }
+    function absMax(){ return inCart + rem() } // total stock = inCart + remaining
+    function setRemainText(v){
+      if(unit==='ea'){
+        const n = parseInt(v,10);
+        remainEl.textContent = Number.isNaN(n) ? v : String(n);
+      } else {
+        remainEl.textContent = v;
+      }
+    }
+    function stepInfo(){
+      if(unit==='lb') return {step:0.5, hard:5};
+      if(unit==='oz') return {step:1,   hard:Infinity};
+      if(unit==='kg') return {step:0.25,hard:5};
+      return {step:1, hard:Infinity};
+    }
+    function fmt(q){ return unit==='oz' ? `${q} oz` : `${q} ${unit}` }
+
+    function applyUpdate(js,newQty){
+      if(typeof js.remaining!=='undefined') setRemainText(js.remaining);
+      inCart = Number(newQty);
+
+      if(unit==='ea'){
+        if(inCart>0){
+          stepEl.classList.remove('hidden');
+          ycps.classList.add('hidden');
+          countEl.textContent = String(Math.floor(inCart));
         } else {
-          form.querySelector('[name=qty]').max = js.remaining;
+          stepEl.classList.add('hidden');
+          ycps.classList.remove('hidden');
         }
-        // Update navbar counter
-        const counter = document.getElementById('cart-count');
-        if (counter) counter.textContent = js.cart_total;
-      });
+      } else {
+        if(inCart>0){
+          ycps.classList.add('hidden');
+          panel.classList.add('hidden');
+          confirm.classList.add('hidden');
+          wStep.classList.remove('hidden');
+          wqty.textContent = String(unit==='oz' ? Math.round(inCart)
+                                : Number(inCart.toFixed(2)).toString().replace(/\.00$/,''));
+          wunit.textContent = unit;
+        } else {
+          wStep.classList.add('hidden');
+          ycps.classList.remove('hidden');
+          panel.classList.add('hidden');
+          confirm.classList.add('hidden');
+        }
+      }
+
+      const counter = document.getElementById('cart-count');
+      if(counter && typeof js.cart_total!=='undefined') counter.textContent = js.cart_total;
+
+      // Only replace controls with "Out of stock" if user has none left
+      if (String(js.remaining) === '0' && Number(inCart) <= 0) {
+        form.remove();
+        const out = document.createElement('p');
+        out.className = 'text-red-600 font-semibold mt-3';
+        out.innerText = 'Out of stock';
+        card.appendChild(out);
+        card.classList.add('bg-gray-200','text-gray-500');
+      }
+    }
+
+    // Build list
+    // mode: "add" (for YCPS first‑time add) OR "absolute" (for caret after already added)
+    function buildList(mode){
+      panel.innerHTML = '';
+
+      const {step, hard} = stepInfo();
+      const remaining = rem();
+      if(mode==='add' && remaining<=0){ panel.classList.add('hidden'); return; }
+
+      let start = step;
+      let end;
+      if(mode==='add'){
+        // show increments that can be ADDED now
+        end = Math.min(remaining, hard);
+      }else{
+        // absolute totals from step up to full stock (inCart + remaining)
+        end = Math.min(absMax(), hard);
+      }
+
+      if(end < start - 1e-9){
+        panel.classList.add('hidden');
+        return;
+      }
+
+      let first = null;
+      for(let q=start; q<=end + 1e-9; q=Math.round((q+step)*1000)/1000){
+        if(first===null) first = q;
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'block w-full text-left px-3 py-2 hover:bg-yellow-100';
+        row.textContent = fmt(q);
+
+        // hover shows est price (increment or absolute total both ok)
+        row.addEventListener('mouseenter', ()=>{
+          const hp = panel.querySelector('.hover-price');
+          if(hp) hp.textContent = `$${(price*q).toFixed(2)}`;
+        });
+
+        row.addEventListener('click', ()=>{
+          if(mode==='add'){
+            // go to confirm card (first add flow)
+            pickToAdd = Math.min(q, rem());
+            panel.classList.add('hidden');
+            confirm.classList.remove('hidden');
+            chosen.textContent = fmt(pickToAdd);
+            est.textContent    = `$${(price*pickToAdd).toFixed(2)}`;
+          } else {
+            // set ABSOLUTE total immediately
+            const target = Math.min(q, absMax());
+            postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); });
+            panel.classList.add('hidden');
+          }
+        });
+
+        panel.appendChild(row);
+      }
+
+      // footer with live price preview
+      const footer = document.createElement('div');
+      footer.className = 'px-3 py-2 text-sm text-gray-700 border-t';
+      footer.innerHTML = `
+        <div>Total est. price: <span class="hover-price font-semibold">$${(price*(first||0)).toFixed(2)}</span></div>
+        <div class="text-gray-500">Final cost by actual weight</div>
+      `;
+      panel.appendChild(footer);
+    }
+
+    // Initial state (preserve after “Continue shopping”)
+    if(unit==='ea'){
+      if(inCart>0){
+        ycps.classList.add('hidden');
+        stepEl.classList.remove('hidden');
+        countEl.textContent = String(Math.floor(inCart));
+      }
+    } else {
+      if(inCart>0){
+        ycps.classList.add('hidden');
+        wStep.classList.remove('hidden');
+        wqty.textContent = String(inCart);
+        wunit.textContent = unit;
+      }
+    }
+
+    // YCPS (first add)
+    ycps?.addEventListener('click', e=>{
+      e.preventDefault();
+      if(unit==='ea'){
+        if(rem()<=0) return;
+        ycps.classList.add('hidden');
+        stepEl.classList.remove('hidden');
+        const target = Math.min(inCart+1, absMax());
+        countEl.textContent = String(target);
+        postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); });
+      } else {
+        ycps.classList.add('hidden');
+        buildList('add');
+        panel.classList.remove('hidden');
+        confirm.classList.add('hidden');
+      }
     });
+
+    // ea stepper
+    inc?.addEventListener('click', e=>{
+      e.preventDefault();
+      const target = Math.min(inCart+1, absMax());
+      if(target===inCart) return;
+      postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); });
+    });
+    dec?.addEventListener('click', e=>{
+      e.preventDefault();
+      const target = Math.max(0, inCart-1);
+      postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); });
+    });
+
+    // caret on weight stepper → absolute totals list
+    wcaret?.addEventListener('click', ()=>{
+      buildList('absolute');
+      panel.classList.remove('hidden');
+      confirm.classList.add('hidden');
+    });
+
+    // Add to Cart from confirm (first add)
+    addBtn?.addEventListener('click', ()=>{
+      if(pickToAdd<=0) return;
+      const target = Math.min(absMax(), inCart + pickToAdd);
+      postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); });
+    });
+
+    // weight stepper after added
+    function weightStep(){ return stepInfo().step; }
+    winc?.addEventListener('click', ()=>{
+      const target = Math.min(absMax(), inCart + weightStep());
+      if(target===inCart) return;
+      postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); });
+    });
+    wdec?.addEventListener('click', ()=>{
+      const target = Math.max(0, inCart - weightStep());
+      postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); });
+    });
+
+    // Click‑outside: close list/confirm; restore appropriate control
+    document.addEventListener('click', (ev)=>{
+      const listOpen    = panel && !panel.classList.contains('hidden');
+      const confirmOpen = confirm && !confirm.classList.contains('hidden');
+      if(!listOpen && !confirmOpen) return;
+      if(form.contains(ev.target)) return;
+
+      if(panel)   panel.classList.add('hidden');
+      if(confirm) confirm.classList.add('hidden');
+
+      if(unit==='ea'){
+        if(inCart>0){ stepEl.classList.remove('hidden'); ycps.classList.add('hidden'); }
+        else { ycps.classList.remove('hidden'); stepEl.classList.add('hidden'); }
+      } else {
+        if(inCart>0){ wStep.classList.remove('hidden'); ycps.classList.add('hidden'); }
+        else { ycps.classList.remove('hidden'); }
+      }
+    });
+
+    // Prevent native submit
+    form.addEventListener('submit', e=>e.preventDefault());
   });
 </script>
 {% endblock %}
