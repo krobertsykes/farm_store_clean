@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>My Orders</title></head>
+<body>
+  <h1>My Orders</h1>
+  {% if orders %}
+    {% for order in orders %}
+      <section>
+        <h3>Order #{{ order.id }} — {{ order.created_at|date:"M d, Y H:i" }} — ${{ order.total }}</h3>
+        <ul>
+          {% for it in order.items.all %}
+            <li>
+              {% if it.product.images.all %}
+                <img src="{{ it.product.images.all.0.image.url }}" style="height:32px;width:32px;vertical-align:middle;object-fit:cover;">
+              {% endif %}
+              {{ it.product.name }} × {{ it.qty }} @ ${{ it.price }} = ${{ it.line_total }}
+            </li>
+          {% endfor %}
+        </ul>
+      </section>
+    {% endfor %}
+  {% else %}
+    <p>No orders yet.</p>
+  {% endif %}
+</body>
+</html>

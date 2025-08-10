@@ -10,7 +10,7 @@
     Continue shopping
   </a>
 {% else %}
-  <table class="w-full text-left mb-8" id="cart-form">
+  <table class="w-full text-left mb-6" id="cart-form">
     <thead>
       <tr class="border-b font-semibold">
         <th>Product</th>
@@ -25,7 +25,7 @@
     <tbody>
       {% for it in items %}
         {% with p=it.product %}
-        <tr class="border-b" data-id="{{ p.id }}">
+        <tr class="border-b align-middle" data-id="{{ p.id }}">
           <td class="py-2">{{ p.name }}</td>
           <td class="py-2">
             {% if p.images.all %}
@@ -36,16 +36,21 @@
             {% endif %}
           </td>
           <td class="py-2">
-            ${{ p.price|floatformat:"2" }}
-            {% if p.unit == 'ea' %}
-              each
-            {% elif p.unit == 'lb' %}
-              per pound
-            {% elif p.unit == 'oz' %}
-              per ounce
-            {% elif p.unit == 'kg' %}
-              per kilogram
+            {# show sale formatting but expose effective price in data attribute for JS #}
+            {% if p.sale_price and p.sale_price < p.price %}
+              <span class="text-gray-500 line-through mr-1">${{ p.price|floatformat:"2" }}</span>
+              <strong class="unit-price">${{ it.unit_price|floatformat:"2" }}</strong>
+            {% else %}
+              <strong class="unit-price">${{ it.unit_price|floatformat:"2" }}</strong>
             {% endif %}
+            <span class="text-sm text-gray-600">
+              {% if p.unit == 'ea' %} each
+              {% elif p.unit == 'lb' %} per pound
+              {% elif p.unit == 'oz' %} per ounce
+              {% elif p.unit == 'kg' %} per kilogram
+              {% endif %}
+            </span>
+            <span class="hidden" data-unit-price="{{ it.unit_price }}"></span>
           </td>
           <td class="py-2"><span class="remain">{{ it.remaining }}</span></td>
           <td class="py-2">
@@ -76,21 +81,67 @@
         {% endwith %}
       {% endfor %}
     </tbody>
+
+    <tfoot>
+      <tr>
+        <td colspan="5" class="text-right py-2 pr-4 text-gray-700">Subtotal</td>
+        <td class="py-2"><span id="cart-subtotal">{{ subtotal|floatformat:"2" }}</span></td>
+        <td></td>
+      </tr>
+      <tr>
+        <td colspan="5" class="text-right py-2 pr-4">
+          {% if coupon %}
+            Coupon ({{ coupon.code }})
+            <form id="clear-coupon" class="inline" method="post" action="{% url 'store:apply_coupon' %}">
+              {% csrf_token %}
+              <input type="hidden" name="code" value="">
+              <button class="text-blue-600 underline">remove</button>
+            </form>
+          {% else %}
+            <form class="inline-flex items-center gap-2" method="post" action="{% url 'store:apply_coupon' %}">
+              {% csrf_token %}
+              {{ coupon_form.code }}
+              <button class="bg-gray-800 text-white rounded px-3 py-1 text-sm">Apply</button>
+            </form>
+          {% endif %}
+        </td>
+        <td class="py-2">-<span id="cart-discount">{{ discount|floatformat:"2" }}</span></td>
+        <td></td>
+      </tr>
+      <tr class="font-semibold">
+        <td colspan="5" class="text-right py-2 pr-4">Total</td>
+        <td class="py-2">$<span id="cart-total">{{ total|floatformat:"2" }}</span></td>
+        <td></td>
+      </tr>
+    </tfoot>
   </table>
 
-  <div class="text-right text-xl font-semibold mb-8">
-    Total: $<span id="cart-total">{{ total|floatformat:"2" }}</span>
+  <div class="flex items-center justify-between">
+    <a href="{% url 'store:catalogue' %}" class="text-blue-600 underline">
+      Continue shopping
+    </a>
+    <a href="{% url 'store:checkout' %}" class="bg-green-600 hover:bg-green-700 text-white rounded px-4 py-2">
+      Checkout
+    </a>
   </div>
-
-  <a href="{% url 'store:catalogue' %}" class="text-blue-600 underline">
-    Continue shopping
-  </a>
 {% endif %}
 
 <script>
 function getCookie(name) {
-  return document.cookie.split('; ').find(c => c.startsWith(name + '='))
-    ?.split('=')[1];
+  return document.cookie.split('; ').find(c => c.startsWith(name + '='))?.split('=')[1];
+}
+
+// recompute table sums after any row change
+function recalcTotals() {
+  let subtotal = 0;
+  document.querySelectorAll("#cart-form tbody tr").forEach(tr => {
+    const lt = tr.querySelector(".line-total")?.textContent || "$0";
+    const n  = parseFloat(lt.replace(/[^0-9.]/g,'') || "0");
+    subtotal += n;
+  });
+  const discount = parseFloat(document.getElementById("cart-discount")?.textContent || "0");
+  document.getElementById("cart-subtotal").textContent = subtotal.toFixed(2);
+  document.getElementById("cart-total").textContent = Math.max(0, subtotal - discount).toFixed(2);
 }
 
 document.querySelectorAll(".qty-input").forEach(inp => {
@@ -119,14 +170,22 @@ document.querySelectorAll(".qty-input").forEach(inp => {
       .then(js => {
         if (!js.ok) return;
         tr.querySelector(".remain").textContent = js.remaining;
-        const priceCell = tr.querySelector("td:nth-child(3)").textContent;
-        const price = parseFloat(priceCell.replace(/[^0-9.]/g, ""));
-        tr.querySelector(".line-total")
-          .textContent = `$${(price * val).toFixed(2)}`;
-        document.getElementById("cart-total")
-          .textContent = js.cart_total;
+
+        // Use EFFECTIVE unit price from data attribute
+        const unitPrice = parseFloat(tr.querySelector("[data-unit-price]")?.getAttribute("data-unit-price") || "0");
+        tr.querySelector(".line-total").textContent = `$${(unitPrice * val).toFixed(2)}`;
+
+        // Subtotal/Total recalc on the client
+        recalcTotals();
       });
-    }, 300);
+    }, 250);
+  });
+});
+
+// handle remove button submits without page reload (optional)
+document.querySelectorAll('form[action^="/cart/remove/"]').forEach(f => {
+  f.addEventListener('submit', (e) => {
+    // let it submit normally if you prefer a reload; otherwise AJAX it.
   });
 });
 </script>

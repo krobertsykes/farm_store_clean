@@ -1,5 +1,3 @@
-# added by Sage at 10:07 AM
-# added by Rob at 10:11 AM
 {% extends "store/base.html" %}
 {% load static %}
 
@@ -48,33 +46,51 @@
 
         <h3 class="font-bold mb-1">{{ product.name }}</h3>
 
-        <p class="text-lg font-semibold mb-1">
-          ${{ product.price|floatformat:"2" }}
-          {% if product.unit == 'ea' %}each{% elif product.unit == 'lb' %} per pound{% elif product.unit == 'oz' %} per ounce{% elif product.unit == 'kg' %}/kg{% endif %}
-        </p>
+        {# SALE/REGULAR PRICE DISPLAY #}
+        {% if product.sale_price and product.sale_price < product.price %}
+          <p class="text-lg font-semibold mb-1">
+            <span class="text-gray-500 line-through mr-2">${{ product.price|floatformat:"2" }}</span>
+            <span class="text-red-600">${{ product.sale_price|floatformat:"2" }}</span>
+            {% if product.unit == 'ea' %} each
+            {% elif product.unit == 'lb' %} per pound
+            {% elif product.unit == 'oz' %} per ounce
+            {% elif product.unit == 'kg' %} /kg
+            {% endif %}
+          </p>
+        {% else %}
+          <p class="text-lg font-semibold mb-1">
+            ${{ product.price|floatformat:"2" }}
+            {% if product.unit == 'ea' %} each
+            {% elif product.unit == 'lb' %} per pound
+            {% elif product.unit == 'oz' %} per ounce
+            {% elif product.unit == 'kg' %} /kg
+            {% endif %}
+          </p>
+        {% endif %}
+
+        <div class="text-sm text-yellow-700 mb-2">★ {{ product.avg_stars|floatformat:1 }}</div>
 
         <p class="text-sm mb-4">
           Remaining: <span class="remain">{{ rem }}</span>
-          {% if product.unit != 'ea' and rem != '0' %}{{ product.get_price_unit_display }}{% endif %}
+          {% if product.unit != 'ea' and rem != '0' %}
+            {% if product.unit == 'lb' %}/lb{% elif product.unit == 'oz' %}/oz{% elif product.unit == 'kg' %}/kg{% endif %}
+          {% endif %}
         </p>
 
-        {# IMPORTANT: keep controls visible if user has some in cart, even when remaining == 0 #}
         {% if rem != '0' or product.in_cart > 0 %}
         <form class="add-form relative flex items-center justify-center gap-2"
               data-pid="{{ product.id }}"
               data-unit="{{ product.unit }}"
               data-initial-in-cart="{{ product.in_cart|default:0 }}"
-              data-price="{{ product.price }}"
+              data-price="{{ product.effective_price }}"
               data-url-update="{% url 'store:update_qty' product.id %}"
               method="post">
           {% csrf_token %}
 
-          <!-- Yellow Circular Plus Sign -->
           <button type="button"
                   class="ycps w-10 h-10 rounded-full bg-yellow-400 hover:bg-yellow-500 active:bg-yellow-600 text-black text-xl font-bold flex items-center justify-center shadow border border-yellow-500"
                   aria-label="Add to cart">+</button>
 
-          <!-- Stepper for unit='ea' -->
           {% if product.unit == 'ea' %}
           <div class="stepper hidden items-center gap-3 px-3 py-1 rounded-full border border-yellow-400 bg-yellow-100">
             <button type="button" class="btn-dec text-2xl leading-none px-2">−</button>
@@ -84,24 +100,18 @@
           {% endif %}
 
           {% if product.unit != 'ea' %}
-            <!-- Amazon‑y pill once something's chosen (one line) -->
             <div class="weight-stepper hidden flex items-center gap-2 px-3 py-1 rounded-full border border-yellow-400 bg-yellow-100 whitespace-nowrap">
               <button type="button" class="wdec text-2xl leading-none px-2">−</button>
               <span class="wqty min-w-12 text-center font-semibold">0</span>
               <span class="wunit text-sm"></span>
-              <!-- caret opens full absolute list -->
               <button type="button" class="wcaret px-1" title="Change amount">
                 <svg class="w-4 h-4 opacity-60" viewBox="0 0 20 20" fill="currentColor"><path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"/></svg>
               </button>
               <button type="button" class="winc text-2xl leading-none px-2">+</button>
             </div>
 
-            <!-- Listbox (opens after YCPS or caret) -->
-            <div class="weight-panel hidden absolute top-full mt-2 left-1/2 -translate-x-1/2 z-30 bg-white border rounded shadow-lg w-48 text-left">
-              <!-- rows injected via JS -->
-            </div>
+            <div class="weight-panel hidden absolute top-full mt-2 left-1/2 -translate-x-1/2 z-30 bg-white border rounded shadow-lg w-48 text-left"></div>
 
-            <!-- Confirm card (used only for first add from YCPS) -->
             <div class="weight-confirm hidden absolute top-full mt-2 left-1/2 -translate-x-1/2 z-20 bg-white border rounded shadow-lg p-3 w-64 text-left">
               <div class="mb-2">
                 <span class="font-medium">Qty:</span>
@@ -116,6 +126,20 @@
           {% endif %}
         </form>
         {% endif %}
+
+        {% if user.is_authenticated %}
+          <form method="post" action="{% url 'store:rate_product' product.id %}" class="mt-3 flex items-center gap-2 justify-center">
+            {% csrf_token %}
+            <label class="text-sm">Rate:</label>
+            <select name="stars" class="border rounded px-2 py-1 text-sm">
+              {% for i in "12345" %}
+                <option value="{{ forloop.counter }}">{{ forloop.counter }}</option>
+              {% endfor %}
+            </select>
+            <input type="text" name="text" placeholder="(optional comment)" class="border rounded px-2 py-1 text-sm w-40">
+            <button class="bg-green-600 hover:bg-green-700 text-white rounded px-3 py-1 text-sm">Save</button>
+          </form>
+        {% endif %}
       </div>
       {% endwith %}
     {% endfor %}
@@ -128,16 +152,12 @@
   }
   function postUpdateQty(url,qty){
     const data=new FormData(); data.append('qty',String(qty));
-    return fetch(url,{
-      method:'POST',
-      headers:{'X-CSRFToken':getCSRF(),'X-Requested-With':'XMLHttpRequest'},
-      body:data
-    }).then(r=>r.json());
+    return fetch(url,{ method:'POST', headers:{'X-CSRFToken':getCSRF(),'X-Requested-With':'XMLHttpRequest'}, body:data }).then(r=>r.json());
   }
 
   document.querySelectorAll('.add-form').forEach(form=>{
     const pid   = form.dataset.pid;
-    const unit  = form.dataset.unit;           // 'ea' | 'lb' | 'oz' | 'kg'
+    const unit  = form.dataset.unit;
     const price = Number(form.dataset.price||'0');
     const url   = form.dataset.urlUpdate;
     let inCart  = Number(form.dataset.initialInCart||'0');
@@ -164,25 +184,15 @@
     const est    = confirm ? confirm.querySelector('.est-price') : null;
     const addBtn = confirm ? confirm.querySelector('.btn-add') : null;
 
-    let pickToAdd = 0; // for initial add flow
+    let pickToAdd = 0;
 
-    // Helpers
     function rem(){ return Number((remainEl?.textContent||'0').replace(/[^\d.]/g,'')) }
-    function absMax(){ return inCart + rem() } // total stock = inCart + remaining
+    function absMax(){ return inCart + rem() }
     function setRemainText(v){
-      if(unit==='ea'){
-        const n = parseInt(v,10);
-        remainEl.textContent = Number.isNaN(n) ? v : String(n);
-      } else {
-        remainEl.textContent = v;
-      }
+      if(unit==='ea'){ const n = parseInt(v,10); remainEl.textContent = Number.isNaN(n) ? v : String(n); }
+      else { remainEl.textContent = v; }
     }
-    function stepInfo(){
-      if(unit==='lb') return {step:0.5, hard:5};
-      if(unit==='oz') return {step:1,   hard:Infinity};
-      if(unit==='kg') return {step:0.25,hard:5};
-      return {step:1, hard:Infinity};
-    }
+    function stepInfo(){ if(unit==='lb') return {step:0.5, hard:5}; if(unit==='oz') return {step:1, hard:Infinity}; if(unit==='kg') return {step:0.25, hard:5}; return {step:1, hard:Infinity}; }
     function fmt(q){ return unit==='oz' ? `${q} oz` : `${q} ${unit}` }
 
     function applyUpdate(js,newQty){
@@ -190,205 +200,75 @@
       inCart = Number(newQty);
 
       if(unit==='ea'){
-        if(inCart>0){
-          stepEl.classList.remove('hidden');
-          ycps.classList.add('hidden');
-          countEl.textContent = String(Math.floor(inCart));
-        } else {
-          stepEl.classList.add('hidden');
-          ycps.classList.remove('hidden');
-        }
+        if(inCart>0){ stepEl.classList.remove('hidden'); ycps.classList.add('hidden'); countEl.textContent = String(Math.floor(inCart)); }
+        else { stepEl.classList.add('hidden'); ycps.classList.remove('hidden'); }
       } else {
         if(inCart>0){
-          ycps.classList.add('hidden');
-          panel.classList.add('hidden');
-          confirm.classList.add('hidden');
-          wStep.classList.remove('hidden');
-          wqty.textContent = String(unit==='oz' ? Math.round(inCart)
-                                : Number(inCart.toFixed(2)).toString().replace(/\.00$/,''));
+          ycps.classList.add('hidden'); panel.classList.add('hidden'); confirm.classList.add('hidden'); wStep.classList.remove('hidden');
+          wqty.textContent = String(unit==='oz' ? Math.round(inCart) : Number(inCart.toFixed(2)).toString().replace(/\.00$/,''));
           wunit.textContent = unit;
         } else {
-          wStep.classList.add('hidden');
-          ycps.classList.remove('hidden');
-          panel.classList.add('hidden');
-          confirm.classList.add('hidden');
+          wStep.classList.add('hidden'); ycps.classList.remove('hidden'); panel.classList.add('hidden'); confirm.classList.add('hidden');
         }
       }
 
       const counter = document.getElementById('cart-count');
       if(counter && typeof js.cart_total!=='undefined') counter.textContent = js.cart_total;
 
-      // Only replace controls with "Out of stock" if user has none left
       if (String(js.remaining) === '0' && Number(inCart) <= 0) {
         form.remove();
-        const out = document.createElement('p');
-        out.className = 'text-red-600 font-semibold mt-3';
-        out.innerText = 'Out of stock';
-        card.appendChild(out);
-        card.classList.add('bg-gray-200','text-gray-500');
+        const out = document.createElement('p'); out.className = 'text-red-600 font-semibold mt-3'; out.innerText = 'Out of stock';
+        card.appendChild(out); card.classList.add('bg-gray-200','text-gray-500');
       }
     }
 
-    // Build list
-    // mode: "add" (for YCPS first‑time add) OR "absolute" (for caret after already added)
     function buildList(mode){
       panel.innerHTML = '';
-
-      const {step, hard} = stepInfo();
-      const remaining = rem();
+      const {step, hard} = stepInfo(); const remaining = rem();
       if(mode==='add' && remaining<=0){ panel.classList.add('hidden'); return; }
-
-      let start = step;
-      let end;
-      if(mode==='add'){
-        // show increments that can be ADDED now
-        end = Math.min(remaining, hard);
-      }else{
-        // absolute totals from step up to full stock (inCart + remaining)
-        end = Math.min(absMax(), hard);
-      }
-
-      if(end < start - 1e-9){
-        panel.classList.add('hidden');
-        return;
-      }
+      let start = step, end = (mode==='add') ? Math.min(remaining, hard) : Math.min(absMax(), hard);
+      if(end < start - 1e-9){ panel.classList.add('hidden'); return; }
 
       let first = null;
       for(let q=start; q<=end + 1e-9; q=Math.round((q+step)*1000)/1000){
         if(first===null) first = q;
-        const row = document.createElement('button');
-        row.type = 'button';
-        row.className = 'block w-full text-left px-3 py-2 hover:bg-yellow-100';
-        row.textContent = fmt(q);
-
-        // hover shows est price (increment or absolute total both ok)
-        row.addEventListener('mouseenter', ()=>{
-          const hp = panel.querySelector('.hover-price');
-          if(hp) hp.textContent = `$${(price*q).toFixed(2)}`;
-        });
-
+        const row = document.createElement('button'); row.type='button'; row.className='block w-full text-left px-3 py-2 hover:bg-yellow-100'; row.textContent = fmt(q);
+        row.addEventListener('mouseenter', ()=>{ const hp = panel.querySelector('.hover-price'); if(hp) hp.textContent = `$${(price*q).toFixed(2)}`; });
         row.addEventListener('click', ()=>{
-          if(mode==='add'){
-            // go to confirm card (first add flow)
-            pickToAdd = Math.min(q, rem());
-            panel.classList.add('hidden');
-            confirm.classList.remove('hidden');
-            chosen.textContent = fmt(pickToAdd);
-            est.textContent    = `$${(price*pickToAdd).toFixed(2)}`;
-          } else {
-            // set ABSOLUTE total immediately
-            const target = Math.min(q, absMax());
-            postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); });
-            panel.classList.add('hidden');
-          }
+          if(mode==='add'){ pickToAdd = Math.min(q, rem()); panel.classList.add('hidden'); confirm.classList.remove('hidden'); chosen.textContent = fmt(pickToAdd); est.textContent = `$${(price*pickToAdd).toFixed(2)}`; }
+          else { const target = Math.min(q, absMax()); postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); }); panel.classList.add('hidden'); }
         });
-
         panel.appendChild(row);
       }
-
-      // footer with live price preview
-      const footer = document.createElement('div');
-      footer.className = 'px-3 py-2 text-sm text-gray-700 border-t';
-      footer.innerHTML = `
-        <div>Total est. price: <span class="hover-price font-semibold">$${(price*(first||0)).toFixed(2)}</span></div>
-        <div class="text-gray-500">Final cost by actual weight</div>
-      `;
+      const footer = document.createElement('div'); footer.className='px-3 py-2 text-sm text-gray-700 border-t';
+      footer.innerHTML = `<div>Total est. price: <span class="hover-price font-semibold">$${(price*(first||0)).toFixed(2)}</span></div><div class="text-gray-500">Final cost by actual weight</div>`;
       panel.appendChild(footer);
     }
 
-    // Initial state (preserve after “Continue shopping”)
-    if(unit==='ea'){
-      if(inCart>0){
-        ycps.classList.add('hidden');
-        stepEl.classList.remove('hidden');
-        countEl.textContent = String(Math.floor(inCart));
-      }
-    } else {
-      if(inCart>0){
-        ycps.classList.add('hidden');
-        wStep.classList.remove('hidden');
-        wqty.textContent = String(inCart);
-        wunit.textContent = unit;
-      }
-    }
+    if(unit==='ea'){ if(inCart>0){ ycps.classList.add('hidden'); stepEl.classList.remove('hidden'); countEl.textContent = String(Math.floor(inCart)); } }
+    else { if(inCart>0){ ycps.classList.add('hidden'); wStep.classList.remove('hidden'); wqty.textContent = String(inCart); wunit.textContent = unit; } }
 
-    // YCPS (first add)
     ycps?.addEventListener('click', e=>{
       e.preventDefault();
-      if(unit==='ea'){
-        if(rem()<=0) return;
-        ycps.classList.add('hidden');
-        stepEl.classList.remove('hidden');
-        const target = Math.min(inCart+1, absMax());
-        countEl.textContent = String(target);
-        postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); });
-      } else {
-        ycps.classList.add('hidden');
-        buildList('add');
-        panel.classList.remove('hidden');
-        confirm.classList.add('hidden');
-      }
+      if(unit==='ea'){ if(rem()<=0) return; ycps.classList.add('hidden'); stepEl.classList.remove('hidden'); const target = Math.min(inCart+1, absMax()); countEl.textContent = String(target); postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); }); }
+      else { ycps.classList.add('hidden'); buildList('add'); panel.classList.remove('hidden'); confirm.classList.add('hidden'); }
     });
 
-    // ea stepper
-    inc?.addEventListener('click', e=>{
-      e.preventDefault();
-      const target = Math.min(inCart+1, absMax());
-      if(target===inCart) return;
-      postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); });
-    });
-    dec?.addEventListener('click', e=>{
-      e.preventDefault();
-      const target = Math.max(0, inCart-1);
-      postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); });
-    });
+    inc?.addEventListener('click', e=>{ e.preventDefault(); const target = Math.min(inCart+1, absMax()); if(target===inCart) return; postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); }); });
+    dec?.addEventListener('click', e=>{ e.preventDefault(); const target = Math.max(0, inCart-1); postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); }); });
 
-    // caret on weight stepper → absolute totals list
-    wcaret?.addEventListener('click', ()=>{
-      buildList('absolute');
-      panel.classList.remove('hidden');
-      confirm.classList.add('hidden');
-    });
+    wcaret?.addEventListener('click', ()=>{ buildList('absolute'); panel.classList.remove('hidden'); confirm.classList.add('hidden'); });
+    addBtn?.addEventListener('click', ()=>{ if(pickToAdd<=0) return; const target = Math.min(absMax(), inCart + pickToAdd); postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); }); });
 
-    // Add to Cart from confirm (first add)
-    addBtn?.addEventListener('click', ()=>{
-      if(pickToAdd<=0) return;
-      const target = Math.min(absMax(), inCart + pickToAdd);
-      postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); });
-    });
-
-    // weight stepper after added
     function weightStep(){ return stepInfo().step; }
-    winc?.addEventListener('click', ()=>{
-      const target = Math.min(absMax(), inCart + weightStep());
-      if(target===inCart) return;
-      postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); });
-    });
-    wdec?.addEventListener('click', ()=>{
-      const target = Math.max(0, inCart - weightStep());
-      postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); });
+    winc?.addEventListener('click', ()=>{ const target = Math.min(absMax(), inCart + weightStep()); if(target===inCart) return; postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); }); });
+    wdec?.addEventListener('click', ()=>{ const target = Math.max(0, inCart - weightStep()); postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); }); });
+
+    document.addEventListener('click', (ev)=>{ const listOpen = panel && !panel.classList.contains('hidden'); const confirmOpen = confirm && !confirm.classList.contains('hidden'); if(!listOpen && !confirmOpen) return; if(form.contains(ev.target)) return; if(panel) panel.classList.add('hidden'); if(confirm) confirm.classList.add('hidden');
+      if(unit==='ea'){ if(inCart>0){ stepEl.classList.remove('hidden'); ycps.classList.add('hidden'); } else { ycps.classList.remove('hidden'); stepEl.classList.add('hidden'); } }
+      else { if(inCart>0){ wStep.classList.remove('hidden'); ycps.classList.add('hidden'); } else { ycps.classList.remove('hidden'); } }
     });
 
-    // Click‑outside: close list/confirm; restore appropriate control
-    document.addEventListener('click', (ev)=>{
-      const listOpen    = panel && !panel.classList.contains('hidden');
-      const confirmOpen = confirm && !confirm.classList.contains('hidden');
-      if(!listOpen && !confirmOpen) return;
-      if(form.contains(ev.target)) return;
-
-      if(panel)   panel.classList.add('hidden');
-      if(confirm) confirm.classList.add('hidden');
-
-      if(unit==='ea'){
-        if(inCart>0){ stepEl.classList.remove('hidden'); ycps.classList.add('hidden'); }
-        else { ycps.classList.remove('hidden'); stepEl.classList.add('hidden'); }
-      } else {
-        if(inCart>0){ wStep.classList.remove('hidden'); ycps.classList.add('hidden'); }
-        else { ycps.classList.remove('hidden'); }
-      }
-    });
-
-    // Prevent native submit
     form.addEventListener('submit', e=>e.preventDefault());
   });
 </script>

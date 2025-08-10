@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Create account</title></head>
+<body>
+  <h1>Create account</h1>
+  <form method="post">
+    {% csrf_token %}
+    <label>Email</label>{{ form.email }}
+    <label>Password</label>{{ form.password }}
+    <label>Phone (SMS)</label>{{ form.phone }}
+    <button type="submit">Sign up</button>
+  </form>
+</body>
+</html>

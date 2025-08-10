@@ -1,17 +1,15 @@
 from pathlib import Path
+import os
 
 # ─── BASE DIR ─────────────────────────────────────────────────────────────────
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # ─── SECURITY ─────────────────────────────────────────────────────────────────
-
 SECRET_KEY = 'your-secret-key-here'
 DEBUG = True
 ALLOWED_HOSTS = []
 
 # ─── APPS & MIDDLEWARE ────────────────────────────────────────────────────────
-
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -34,12 +32,9 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = 'config.urls'
-
 WSGI_APPLICATION = 'config.wsgi.application'
 
-
 # ─── TEMPLATES ────────────────────────────────────────────────────────────────
-
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
@@ -56,9 +51,7 @@ TEMPLATES = [
     },
 ]
 
-
-# ─── DATABASE ──────────────────────────────────────────────────────────────────
-
+# ─── DATABASE ─────────────────────────────────────────────────────────────────
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
@@ -66,9 +59,7 @@ DATABASES = {
     }
 }
 
-
 # ─── AUTH VALIDATORS ──────────────────────────────────────────────────────────
-
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
@@ -76,28 +67,30 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
-
 # ─── INTERNATIONALIZATION ─────────────────────────────────────────────────────
-
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE     = 'America/New_York'
 USE_I18N      = True
 USE_L10N      = True
 USE_TZ        = True
 
-
-# ─── STATIC FILES ─────────────────────────────────────────────────────────────
-
+# ─── STATIC & MEDIA ───────────────────────────────────────────────────────────
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [ BASE_DIR / 'static' ]
-
-
-# ─── MEDIA FILES (your uploads) ───────────────────────────────────────────────
 
 MEDIA_URL  = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-
 # ─── DEFAULT PK FIELD TYPE ────────────────────────────────────────────────────
-
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# ─── AUTH BACKENDS (email-as-username) ────────────────────────────────────────
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.ModelBackend',
+    'store.auth_backends.EmailBackend',   # allow login with email
+]
+
+# ─── EMAIL ────────────────────────────────────────────────────────────────────
+EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'no-reply@farmstore.local')
+ORDER_NOTIFICATION_EMAIL = os.getenv('ORDER_NOTIFICATION_EMAIL', 'owner@farmstore.local')
