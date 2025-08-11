@@ -93,3 +93,28 @@ class Rating(models.Model):
 
     def __str__(self) -> str:
         return f"{self.product_id}:{self.user_id} → {self.stars}"
+
+
+# ──────────────── Favorites (persistent across devices/logins) ────────────────
+class Favorite(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="favorites",
+    )
+    product = models.ForeignKey(
+        "products.Product",
+        on_delete=models.CASCADE,
+        related_name="favorited_by",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = (("user", "product"),)
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["user", "product"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user_id} ♥ {self.product_id}"

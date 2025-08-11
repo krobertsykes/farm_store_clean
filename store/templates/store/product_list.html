@@ -4,15 +4,28 @@
 {% block content %}
 <div class="flex justify-between items-center mb-6">
   <h1 class="text-3xl font-bold">Fresh Produce</h1>
-  {% if not show_oos %}
-    {% if has_oos %}
-      <a href="{% url 'store:catalogue' %}?oos=1" class="text-blue-600 underline">Show out-of-stock</a>
+
+  <div class="flex items-center gap-5">
+    {# OOS toggle (unchanged) #}
+    {% if not show_oos %}
+      {% if has_oos %}
+        <a href="{% url 'store:catalogue' %}?oos=1{% if show_fav %}&fav=1{% endif %}" class="text-blue-600 underline">Show out-of-stock</a>
+      {% else %}
+        <span class="text-gray-400 cursor-not-allowed">Show out-of-stock</span>
+      {% endif %}
     {% else %}
-      <span class="text-gray-400 cursor-not-allowed">Show out-of-stock</span>
+      <a href="{% url 'store:catalogue' %}?oos=0{% if show_fav %}&fav=1{% endif %}" class="text-blue-600 underline">Hide out-of-stock</a>
     {% endif %}
-  {% else %}
-    <a href="{% url 'store:catalogue' %}?oos=0" class="text-blue-600 underline">Hide out-of-stock</a>
-  {% endif %}
+
+    {# Favorites toggle (only useful if signed in) #}
+    {% if user.is_authenticated %}
+      {% if show_fav %}
+        <a href="{% url 'store:catalogue' %}?oos={% if show_oos %}1{% else %}0{% endif %}&fav=0" class="text-blue-600 underline">Hide favorites</a>
+      {% else %}
+        <a href="{% url 'store:catalogue' %}?oos={% if show_oos %}1{% else %}0{% endif %}&fav=1" class="text-blue-600 underline">Show favorites</a>
+      {% endif %}
+    {% endif %}
+  </div>
 </div>
 
 {% for category in categories %}
@@ -25,24 +38,47 @@
     {% for product in category.visible_products %}
       {% with rem=product.remaining|floatformat:"0" %}
       <div id="prod-{{ product.id }}"
-           class="rounded-lg shadow p-4 text-center {% if rem == '0' and not product.in_cart %}bg-gray-200 text-gray-500{% endif %}">
+           class="relative rounded-lg shadow p-4 text-center {% if rem == '0' and not product.in_cart %}bg-gray-200 text-gray-500{% endif %}">
 
-        {% with imgs=product.images.all %}
-          {% if imgs %}
-            <div x-data="{ src: '{{ imgs.0.image.url }}' }" class="flex flex-col items-center mb-3">
-              <img :src="src" class="rounded h-44 w-full object-cover {% if rem == '0' and not product.in_cart %}opacity-50{% endif %}">
-              {% if imgs|length > 1 %}
-                <div class="flex gap-2 mt-2">
-                  {% for pic in imgs %}
-                    <img src="{{ pic.image.url }}"
-                         class="w-16 h-16 rounded cursor-pointer border hover:ring-2 hover:ring-green-500"
-                         @click="src='{{ pic.image.url }}'">
-                  {% endfor %}
-                </div>
-              {% endif %}
-            </div>
-          {% endif %}
-        {% endwith %}
+        {# Favorite heart in the top-right #}
+        {% if user.is_authenticated %}
+          <button type="button"
+                  class="fav-btn absolute top-2 right-2 p-1 rounded-full bg-white/80 hover:bg-white shadow"
+                  data-pid="{{ product.id }}"
+                  data-fav-url="/favorites/toggle/{{ product.id }}/"
+                  aria-pressed="{{ product.is_favorite|yesno:'true,false' }}"
+                  title="Toggle favorite">
+            {# filled heart #}
+            <svg class="heart-on w-6 h-6 {% if not product.is_favorite %}hidden{% endif %}" viewBox="0 0 24 24" fill="#ef4444" aria-hidden="true">
+              <path d="M12 21s-7.5-4.35-10-8.5C-0.5 8.5 2.5 4 6.5 4c2 0 3.5 1 5.5 3 2-2 3.5-3 5.5-3 4 0 7 4.5 4 8.5C19.5 16.65 12 21 12 21z"/>
+            </svg>
+            {# outline heart #}
+            <svg class="heart-off w-6 h-6 {% if product.is_favorite %}hidden{% endif %}" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" aria-hidden="true">
+              <path d="M20.84 4.61A5.5 5.5 0 0012 8.28a5.5 5.5 0 00-8.84-3.67c-2.6 2.28-2.27 6.32.62 8.5L12 21l8.22-7.89c2.89-2.18 3.22-6.22.62-8.5z" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        {% endif %}
+
+{% with imgs=product.images.all %}
+  {% if imgs %}
+    <div x-data="{ src: '{{ imgs.0.image.url }}' }" class="flex flex-col items-center mb-3">
+      <img :src="src" class="rounded h-44 w-full object-cover {% if rem == '0' and not product.in_cart %}opacity-50{% endif %}">
+
+      {# Always render this rail; fixed height keeps titles aligned across cards #}
+      <div class="mt-2 h-20">
+        {% if imgs|length > 1 %}
+          <div class="flex gap-2">
+            {% for pic in imgs|slice:":3" %}
+              <img src="{{ pic.image.url }}"
+                   class="w-16 h-16 rounded cursor-pointer border hover:ring-2 hover:ring-green-500"
+                   @click="src='{{ pic.image.url }}'">
+            {% endfor %}
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+{% endwith %}
 
         <h3 class="font-bold mb-1">{{ product.name }}</h3>
 
@@ -68,52 +104,34 @@
           </p>
         {% endif %}
 
-        {# RATINGS: overall avg (click for breakdown) + "your rating" strip #}
-        <div class="mb-2 flex items-center justify-center gap-3">
-          <a href="{% url 'store:reviews_detail' product.id %}"
-             class="text-sm text-yellow-700 underline"
-             title="See rating breakdown and comments">
-             ★ {{ product.avg_stars|floatformat:1 }}
-          </a>
-
+        {# RATINGS: clickable stars + "(avg X.X)" on one line; default avg to 5.0 #}
+        <div class="mb-2 flex items-center justify-center gap-2">
           {% if user.is_authenticated %}
-            <span class="flex items-center gap-1 text-sm">
-              <span class="text-gray-600">Your:</span>
-              <span class="inline-flex">
-                {% for i in "12345" %}
-                  {% with k=forloop.counter %}
-                    {% if product.user_stars|default:0 >= k %}
-                      <svg class="w-4 h-4" viewBox="0 0 20 20" fill="#F59E0B" aria-hidden="true"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.09 3.355a1 1 0 00.95.69h3.527c.969 0 1.371 1.24.588 1.81l-2.855 2.074a1 1 0 00-.364 1.118l1.09 3.356c.3.921-.755 1.688-1.54 1.118l-2.855-2.074a1 1 0 00-1.176 0l-2.855 2.074c-.784.57-1.838-.197-1.539-1.118l1.09-3.356a1 1 0 00-.364-1.118L2.844 8.782c-.783-.57-.38-1.81.588-1.81h3.527a1 1 0 00.95-.69l1.09-3.355z"/></svg>
-                    {% else %}
-                      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="#F59E0B"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.62L12 2 9.19 8.62 2 9.24l5.46 4.73L5.82 21z"/></svg>
-                    {% endif %}
-                  {% endwith %}
-                {% endfor %}
-              </span>
+            <span class="inline-flex">
+              {% for i in "12345" %}
+                {% with k=forloop.counter %}
+                <button type="button" class="rate-btn" data-pid="{{ product.id }}" data-stars="{{ k }}"
+                        title="Set {{ k }} star{% if k != 1 %}s{% endif %}">
+                  {% if product.user_stars|default:0 >= k %}
+                    <svg class="w-5 h-5" viewBox="0 0 20 20" fill="#F59E0B"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.09 3.355a1 1 0 00.95.69h3.527c.969 0 1.371 1.24.588 1.81l-2.855 2.074a1 1 0 00-.364 1.118l1.09 3.356c.3.921-.755 1.688-1.54 1.118l-2.855-2.074a1 1 0 00-1.176 0l-2.855 2.074c-.784.57-1.838-.197-1.539-1.118l1.09-3.356a1 1 0 00-.364-1.118L2.844 8.782c-.783-.57-.38-1.81.588-1.81h3.527a1 1 0 00.95-.69l1.09-3.355z"/></svg>
+                  {% else %}
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="#F59E0B"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.62L12 2 9.19 8.62 2 9.24l5.46 4.73L5.82 21z"/></svg>
+                  {% endif %}
+                </button>
+                {% endwith %}
+              {% endfor %}
             </span>
+          {% else %}
+            <a href="{% url 'store:reviews_detail' product.id %}" class="text-sm text-yellow-700 underline">Sign in to rate</a>
           {% endif %}
+
+          <a href="{% url 'store:reviews_detail' product.id %}" class="text-sm text-yellow-700 underline" title="See rating breakdown and comments">
+            (avg <span class="avg-stars" data-pid="{{ product.id }}">{{ product.avg_stars|default:5|floatformat:1 }}</span>)
+          </a>
         </div>
 
-        {# CLICKABLE 5-STAR INPUT (server enforces must-be-logged-in + must-have-purchased) #}
-        {% if user.is_authenticated %}
-          <div class="mt-1 flex items-center justify-center gap-1" aria-label="Rate this product">
-            {% for i in "12345" %}
-              {% with k=forloop.counter %}
-              <button type="button" class="rate-btn" data-pid="{{ product.id }}" data-stars="{{ k }}"
-                      title="Set {{ k }} star{% if k != 1 %}s{% endif %}">
-                {% if product.user_stars|default:0 >= k %}
-                  <svg class="w-5 h-5" viewBox="0 0 20 20" fill="#F59E0B"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.09 3.355a1 1 0 00.95.69h3.527c.969 0 1.371 1.24.588 1.81l-2.855 2.074a1 1 0 00-.364 1.118l1.09 3.356c.3.921-.755 1.688-1.54 1.118l-2.855-2.074a1 1 0 00-1.176 0l-2.855 2.074c-.784.57-1.838-.197-1.539-1.118l1.09-3.356a1 1 0 00-.364-1.118L2.844 8.782c-.783-.57-.38-1.81.588-1.81h3.527a1 1 0 00.95-.69l1.09-3.355z"/></svg>
-                {% else %}
-                  <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="#F59E0B"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.62L12 2 9.19 8.62 2 9.24l5.46 4.73L5.82 21z"/></svg>
-                {% endif %}
-              </button>
-              {% endwith %}
-            {% endfor %}
-          </div>
-        {% endif %}
-
         <p class="text-sm mb-4 mt-2">
-          Remaining: <span class="remain">{{ rem }}</span>
+          Remaining: <span class="remain">{% if product.unit == 'ea' %}{{ rem }}{% else %}{{ product.remaining }}{% endif %}</span>
           {% if product.unit != 'ea' and rem != '0' %}
             {% if product.unit == 'lb' %}/lb{% elif product.unit == 'oz' %}/oz{% elif product.unit == 'kg' %}/kg{% endif %}
           {% endif %}
@@ -124,6 +142,7 @@
         <form class="add-form relative flex items-center justify-center gap-2"
               data-pid="{{ product.id }}"
               data-unit="{{ product.unit }}"
+              data-stock="{{ product.stock_qty }}"
               data-initial-in-cart="{{ product.in_cart|default:0 }}"
               data-price="{{ product.effective_price }}"
               data-url-update="{% url 'store:update_qty' product.id %}"
@@ -184,7 +203,34 @@
     return fetch(url,{ method:'POST', headers:{'X-CSRFToken':getCSRF(),'X-Requested-With':'XMLHttpRequest'}, body:data }).then(r=>r.json());
   }
 
-  // Clickable star rating (logged-in users). Server enforces "must have purchased".
+  // --- Favorite toggle ---
+  document.querySelectorAll('.fav-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const pid = btn.dataset.pid;
+      const url = btn.dataset.favUrl || `/favorites/toggle/${pid}/`;
+      fetch(url, { method:'POST', headers:{'X-CSRFToken':getCSRF(),'X-Requested-With':'XMLHttpRequest'} })
+        .then(r=>r.json())
+        .then(js=>{
+          if(!js || !js.ok) return;
+          const on = !!js.favorited;
+          btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+          const onEl  = btn.querySelector('.heart-on');
+          const offEl = btn.querySelector('.heart-off');
+          if(on){ onEl?.classList.remove('hidden'); offEl?.classList.add('hidden'); }
+          else { offEl?.classList.remove('hidden'); onEl?.classList.add('hidden'); }
+
+          // If we're filtered to favorites (fav=1) and user unfavorites, hide the card
+          if(!on && new URLSearchParams(location.search).get('fav') === '1'){
+            const card = btn.closest('[id^="prod-"]'); card?.classList.add('opacity-50');
+            // remove after a short delay for a nicer feel
+            setTimeout(()=>{ card?.remove(); }, 150);
+          }
+        })
+        .catch(()=>{});
+    });
+  });
+
+  // --- Rating: save immediately, refresh fill + average ---
   document.querySelectorAll('.rate-btn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const pid = btn.dataset.pid, stars = btn.dataset.stars;
@@ -192,8 +238,10 @@
         method: 'POST',
         headers: {'X-CSRFToken': getCSRF(), 'X-Requested-With':'XMLHttpRequest'},
         body: new URLSearchParams({stars})
-      }).then(()=>{
-        // Optimistic fill update
+      })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(js=>{
+        // Fill up to selected
         const wrap = btn.parentElement;
         wrap.querySelectorAll('.rate-btn').forEach(b=>{
           const k = parseInt(b.dataset.stars,10);
@@ -204,16 +252,23 @@
             svg.setAttribute('fill','none'); svg.setAttribute('stroke','#F59E0B');
           }
         });
-      });
+        // Update average number if server returned it
+        const avgEl = document.querySelector(`.avg-stars[data-pid="${pid}"]`);
+        if(js && js.ok && typeof js.avg !== 'undefined' && avgEl){
+          const v = Math.round(Number(js.avg)*10)/10;
+          avgEl.textContent = v.toFixed(1);
+        }
+      }).catch(()=>{ /* ignore if server rejected (e.g., not purchased) */ });
     });
   });
 
-  // Your original add-to-cart JS (unchanged)
+  // --- Cart controls (unchanged logic, but anchored to data-stock) ---
   document.querySelectorAll('.add-form').forEach(form=>{
     const pid   = form.dataset.pid;
     const unit  = form.dataset.unit;
     const price = Number(form.dataset.price||'0');
     const url   = form.dataset.urlUpdate;
+    const stock = Number(form.dataset.stock || '0'); // hard ceiling
     let inCart  = Number(form.dataset.initialInCart||'0');
 
     const card     = document.getElementById('prod-'+pid);
@@ -240,87 +295,137 @@
 
     let pickToAdd = 0;
 
-    function rem(){ return Number((remainEl?.textContent||'0').replace(/[^\d.]/g,'')) }
-    function absMax(){ return inCart + rem() }
-    function setRemainText(v){
-      if(unit==='ea'){ const n = parseInt(v,10); remainEl.textContent = Number.isNaN(n) ? v : String(n); }
-      else { remainEl.textContent = v; }
+    function remaining(){ return Math.max(0, stock - inCart); }
+    function stepInfo(){
+      if(unit==='lb') return {step:0.5, hard:5};
+      if(unit==='oz') return {step:1, hard:Infinity};
+      if(unit==='kg') return {step:0.25, hard:5};
+      return {step:1, hard:Infinity}; // 'ea'
     }
-    function stepInfo(){ if(unit==='lb') return {step:0.5, hard:5}; if(unit==='oz') return {step:1, hard:Infinity}; if(unit==='kg') return {step:0.25, hard:5}; return {step:1, hard:Infinity}; }
-    function fmt(q){ return unit==='oz' ? `${q} oz` : `${q} ${unit}` }
+    function fmtQty(q){
+      if(unit==='ea') return String(Math.floor(q));
+      if(unit==='oz') return String(Math.round(q)) + ' oz';
+      const n = Math.round(q*100)/100;
+      return String(n.toFixed(2).replace(/\.00$/,'')) + ' ' + unit;
+    }
+    function setRemainText(v){
+      if(unit==='ea'){ remainEl.textContent = String(Math.floor(Number(v)||0)); }
+      else { remainEl.textContent = String(v); }
+    }
 
-    function applyUpdate(js,newQty){
-      if(typeof js.remaining!=='undefined') setRemainText(js.remaining);
-      inCart = Number(newQty);
-
+    function syncUI(){
+      setRemainText(remaining());
       if(unit==='ea'){
-        if(inCart>0){ stepEl.classList.remove('hidden'); ycps.classList.add('hidden'); countEl.textContent = String(Math.floor(inCart)); }
-        else { stepEl.classList.add('hidden'); ycps.classList.remove('hidden'); }
-      } else {
         if(inCart>0){
-          ycps.classList.add('hidden'); panel.classList.add('hidden'); confirm.classList.add('hidden'); wStep.classList.remove('hidden');
-          wqty.textContent = String(unit==='oz' ? Math.round(inCart) : Number(inCart.toFixed(2)).toString().replace(/\.00$/,''));
+          stepEl.classList.remove('hidden');
+          ycps.classList.add('hidden');
+          countEl.textContent = String(Math.floor(inCart));
+        }else{
+          stepEl.classList.add('hidden');
+          ycps.classList.remove('hidden');
+        }
+      }else{
+        if(inCart>0){
+          ycps.classList.add('hidden');
+          panel.classList.add('hidden');
+          confirm.classList.add('hidden');
+          wStep.classList.remove('hidden');
+          wqty.textContent = (unit==='oz') ? String(Math.round(inCart)) : String((Math.round(inCart*100)/100).toFixed(2).replace(/\.00$/,''));
           wunit.textContent = unit;
-        } else {
-          wStep.classList.add('hidden'); ycps.classList.remove('hidden'); panel.classList.add('hidden'); confirm.classList.add('hidden');
+        }else{
+          wStep.classList.add('hidden');
+          ycps.classList.remove('hidden');
+          panel.classList.add('hidden');
+          confirm.classList.add('hidden');
         }
       }
-
-      const counter = document.getElementById('cart-count');
-      if(counter && typeof js.cart_total!=='undefined') counter.textContent = js.cart_total;
-
-      if (String(js.remaining) === '0' && Number(inCart) <= 0) {
+      if(remaining() <= 0 && inCart <= 0){
         form.remove();
         const out = document.createElement('p'); out.className = 'text-red-600 font-semibold mt-3'; out.innerText = 'Out of stock';
         card.appendChild(out); card.classList.add('bg-gray-200','text-gray-500');
       }
     }
 
-    function buildList(mode){
-      panel.innerHTML = '';
-      const {step, hard} = stepInfo(); const remaining = rem();
-      if(mode==='add' && remaining<=0){ panel.classList.add('hidden'); return; }
-      let start = step, end = (mode==='add') ? Math.min(remaining, hard) : Math.min(absMax(), hard);
-      if(end < start - 1e-9){ panel.classList.add('hidden'); return; }
+    function applyServer(newQty, js){
+      inCart = Number(newQty);
+      const rem = (js && typeof js.remaining !== 'undefined') ? js.remaining : remaining();
+      setRemainText(rem);
+      const counter = document.getElementById('cart-count');
+      if(counter && js && typeof js.cart_total!=='undefined') counter.textContent = js.cart_total;
+      syncUI();
+    }
 
-      let first = null;
-      for(let q=start; q<=end + 1e-9; q=Math.round((q+step)*1000)/1000){
-        if(first===null) first = q;
-        const row = document.createElement('button'); row.type='button'; row.className='block w-full text-left px-3 py-2 hover:bg-yellow-100'; row.textContent = fmt(q);
-        row.addEventListener('mouseenter', ()=>{ const hp = panel.querySelector('.hover-price'); if(hp) hp.textContent = `$${(price*q).toFixed(2)}`; });
+    syncUI();
+
+    ycps?.addEventListener('click', e=>{
+      e.preventDefault();
+      const {step} = stepInfo();
+      const target = Math.min(stock, inCart + step);
+      if(target === inCart) return;
+      postUpdateQty(url, target).then(js=>{ if(js?.ok) applyServer(target, js); });
+    });
+
+    inc?.addEventListener('click', e=>{
+      e.preventDefault();
+      const target = Math.min(stock, inCart + 1);
+      if(target===inCart) return;
+      postUpdateQty(url, target).then(js=>{ if(js?.ok) applyServer(target, js); });
+    });
+    dec?.addEventListener('click', e=>{
+      e.preventDefault();
+      const target = Math.max(0, inCart - 1);
+      postUpdateQty(url, target).then(js=>{ if(js?.ok) applyServer(target, js); });
+    });
+
+    function weightStep(){ return stepInfo().step; }
+
+    wcaret?.addEventListener('click', ()=>{
+      panel.innerHTML = '';
+      const {step, hard} = stepInfo();
+      const end = Math.min(stock, hard);
+      if(end <= 0){ panel.classList.add('hidden'); return; }
+      for(let q=step; q<=end + 1e-9; q=Math.round((q+step)*1000)/1000){
+        const row = document.createElement('button'); row.type='button'; row.className='block w-full text-left px-3 py-2 hover:bg-yellow-100'; row.textContent = fmtQty(q);
+        row.addEventListener('mouseenter', ()=>{
+          const hp = panel.querySelector('.hover-price'); if(hp) hp.textContent = `$${(price*q).toFixed(2)}`;
+        });
         row.addEventListener('click', ()=>{
-          if(mode==='add'){ pickToAdd = Math.min(q, rem()); panel.classList.add('hidden'); confirm.classList.remove('hidden'); chosen.textContent = fmt(pickToAdd); est.textContent = `$${(price*pickToAdd).toFixed(2)}`; }
-          else { const target = Math.min(q, absMax()); postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); }); panel.classList.add('hidden'); }
+          pickToAdd = Math.min(q, Math.max(0, stock - inCart));
+          panel.classList.add('hidden'); confirm.classList.remove('hidden'); chosen.textContent = fmtQty(pickToAdd); est.textContent = `$${(price*pickToAdd).toFixed(2)}`;
         });
         panel.appendChild(row);
       }
       const footer = document.createElement('div'); footer.className='px-3 py-2 text-sm text-gray-700 border-t';
-      footer.innerHTML = `<div>Total est. price: <span class="hover-price font-semibold">$${(price*(first||0)).toFixed(2)}</span></div><div class="text-gray-500">Final cost by actual weight</div>`;
+      footer.innerHTML = `<div>Total est. price: <span class="hover-price font-semibold">$${(price*step).toFixed(2)}</span></div><div class="text-gray-500">Final cost by actual weight</div>`;
       panel.appendChild(footer);
-    }
 
-    if(unit==='ea'){ if(inCart>0){ ycps.classList.add('hidden'); stepEl.classList.remove('hidden'); countEl.textContent = String(Math.floor(inCart)); } }
-    else { if(inCart>0){ ycps.classList.add('hidden'); wStep.classList.remove('hidden'); wqty.textContent = String(inCart); wunit.textContent = unit; } }
-
-    ycps?.addEventListener('click', e=>{
-      e.preventDefault();
-      if(unit==='ea'){ if(rem()<=0) return; ycps.classList.add('hidden'); stepEl.classList.remove('hidden'); const target = Math.min(inCart+1, absMax()); countEl.textContent = String(target); postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); }); }
-      else { ycps.classList.add('hidden'); buildList('add'); panel.classList.remove('hidden'); confirm.classList.add('hidden'); }
+      panel.classList.remove('hidden'); confirm.classList.add('hidden');
     });
 
-    inc?.addEventListener('click', e=>{ e.preventDefault(); const target = Math.min(inCart+1, absMax()); if(target===inCart) return; postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); }); });
-    dec?.addEventListener('click', e=>{ e.preventDefault(); const target = Math.max(0, inCart-1); postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); }); });
+    addBtn?.addEventListener('click', ()=>{
+      if(pickToAdd<=0) return;
+      const target = Math.min(stock, inCart + pickToAdd);
+      postUpdateQty(url, target).then(js=>{ if(js?.ok) applyServer(target, js); });
+    });
 
-    wcaret?.addEventListener('click', ()=>{ buildList('absolute'); panel.classList.remove('hidden'); confirm.classList.add('hidden'); });
-    addBtn?.addEventListener('click', ()=>{ if(pickToAdd<=0) return; const target = Math.min(absMax(), inCart + pickToAdd); postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); }); });
+    winc?.addEventListener('click', ()=>{
+      const target = Math.min(stock, inCart + weightStep());
+      if(target===inCart) return;
+      postUpdateQty(url, target).then(js=>{ if(js?.ok) applyServer(target, js); });
+    });
+    wdec?.addEventListener('click', ()=>{
+      const target = Math.max(0, inCart - weightStep());
+      postUpdateQty(url, target).then(js=>{ if(js?.ok) applyServer(target, js); });
+    });
 
-    function weightStep(){ return stepInfo().step; }
-    winc?.addEventListener('click', ()=>{ const target = Math.min(absMax(), inCart + weightStep()); if(target===inCart) return; postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); }); });
-    wdec?.addEventListener('click', ()=>{ const target = Math.max(0, inCart - weightStep()); postUpdateQty(url, target).then(js=>{ if(js?.ok) applyUpdate(js, target); }); });
-
-    document.addEventListener('click', (ev)=>{ const listOpen = panel && !panel.classList.contains('hidden'); const confirmOpen = confirm && !confirm.classList.contains('hidden'); if(!listOpen && !confirmOpen) return; if(form.contains(ev.target)) return; if(panel) panel.classList.add('hidden'); if(confirm) confirm.classList.add('hidden');
-      if(unit==='ea'){ if(inCart>0){ stepEl.classList.remove('hidden'); ycps.classList.add('hidden'); } else { ycps.classList.remove('hidden'); stepEl.classList.add('hidden'); } }
-      else { if(inCart>0){ wStep.classList.remove('hidden'); ycps.classList.add('hidden'); } else { ycps.classList.remove('hidden'); } }
+    document.addEventListener('click', (ev)=>{
+      const listOpen = panel && !panel.classList.contains('hidden');
+      const confirmOpen = confirm && !confirm.classList.contains('hidden');
+      if(!listOpen && !confirmOpen) return;
+      if(form.contains(ev.target)) return;
+      if(panel) panel.classList.add('hidden');
+      if(confirm) confirm.classList.add('hidden');
+      syncUI();
     });
 
     form.addEventListener('submit', e=>e.preventDefault());

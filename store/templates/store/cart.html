@@ -52,7 +52,11 @@
             </span>
             <span class="hidden" data-unit-price="{{ it.unit_price }}"></span>
           </td>
-          <td class="py-2"><span class="remain">{{ it.remaining }}</span></td>
+          <td class="py-2">
+            <span class="remain">
+              {% if p.unit == 'ea' %}{{ it.remaining|floatformat:"0" }}{% else %}{{ it.remaining }}{% endif %}
+            </span>
+          </td>
           <td class="py-2">
             <input type="number"
                    name="qty"
@@ -116,14 +120,34 @@
     </tfoot>
   </table>
 
-  <div class="flex items-center justify-between">
-    <a href="{% url 'store:catalogue' %}" class="text-blue-600 underline">
-      Continue shopping
-    </a>
-    <a href="{% url 'store:checkout' %}" class="bg-green-600 hover:bg-green-700 text-white rounded px-4 py-2">
-      Checkout
-    </a>
-  </div>
+  {# Consolidated checkout on the cart page #}
+  <form method="post" action="{% url 'store:checkout' %}" class="bg-white p-4 rounded shadow space-y-4">
+    {% csrf_token %}
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-sm font-medium">Email</label>
+        {{ checkout_form.email }}
+      </div>
+      <div>
+        <label class="block text-sm font-medium">Phone</label>
+        {{ checkout_form.phone }}
+        <p class="text-xs text-gray-500 mt-1">SMS may incur carrier charges.</p>
+      </div>
+    </div>
+    <div>
+      <label class="block text-sm font-medium mb-1">Payment method</label>
+      {{ checkout_form.payment_method }}
+    </div>
+
+    <div class="flex items-center justify-between">
+      <a href="{% url 'store:catalogue' %}" class="text-blue-600 underline">
+        Continue shopping
+      </a>
+      <button class="bg-green-600 hover:bg-green-700 text-white rounded px-4 py-2">
+        Place Order
+      </button>
+    </div>
+  </form>
 {% endif %}
 
 <script>
@@ -142,6 +166,19 @@ function recalcTotals() {
   const discount = parseFloat(document.getElementById("cart-discount")?.textContent || "0");
   document.getElementById("cart-subtotal").textContent = subtotal.toFixed(2);
   document.getElementById("cart-total").textContent = Math.max(0, subtotal - discount).toFixed(2);
+}
+
+// keep the header cart badge in sync even if the header didn't re-render
+function updateHeaderCountFromTable(){
+  let total = 0;
+  document.querySelectorAll(".qty-input").forEach(inp=>{
+    total += parseFloat(inp.value) || 0;
+  });
+  const counter = document.getElementById("cart-count");
+  if(counter){
+    const t = Math.round(total*100)/100;
+    counter.textContent = (Number.isInteger(t) ? t.toString() : t.toFixed(2).replace(/\.00$/,''));
+  }
 }
 
 document.querySelectorAll(".qty-input").forEach(inp => {
@@ -178,21 +215,19 @@ document.querySelectorAll(".qty-input").forEach(inp => {
         // Subtotal/Total recalc on the client
         recalcTotals();
 
-        // NEW: also update header cart count using server's cart_total
+        // Update header cart count - prefer server value, else compute
         const cartCount = document.getElementById("cart-count");
         if (cartCount && typeof js.cart_total !== "undefined") {
           cartCount.textContent = js.cart_total;
+        } else {
+          updateHeaderCountFromTable();
         }
       });
     }, 250);
   });
 });
 
-// handle remove button submits without page reload (optional)
-document.querySelectorAll('form[action^="/cart/remove/"]').forEach(f => {
-  f.addEventListener('submit', (e) => {
-    // let it submit normally if you prefer a reload; otherwise AJAX it.
-  });
-});
+// also sync header count on initial cart page load
+updateHeaderCountFromTable();
 </script>
 {% endblock %}

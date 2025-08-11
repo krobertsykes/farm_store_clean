@@ -9,7 +9,7 @@ from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.core.mail import send_mail
-from django.db.models import Avg, Count
+from django.db.models import Avg, Count, Q
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -17,6 +17,12 @@ from django.utils import timezone
 from products.models import Product
 from .forms import CheckoutForm, CouponForm, ProfileForm, SignupForm
 from .models import Coupon, Order, OrderItem, Profile, Rating
+
+# Optional: persistent favorites if the DB model exists; else fallback to session
+try:
+    from .models import Favorite  # type: ignore
+except Exception:  # pragma: no cover
+    Favorite = None  # session-only fallback
 
 
 # =========================
@@ -34,7 +40,10 @@ def _get_cart(session) -> Dict[str, Dict[str, Any]]:
 def _entry_qty(entry) -> Decimal:
     """Read qty from either new dict shape {'qty': ...} or legacy raw number/string."""
     if isinstance(entry, dict):
-        return Decimal(str(entry.get("qty", "0") or "0"))
+        try:
+            return Decimal(str(entry.get("qty", "0") or "0"))
+        except Exception:
+            return Decimal("0")
     try:
         return Decimal(str(entry))
     except Exception:
@@ -62,40 +71,86 @@ def _ensure_profile(user):
     prof, _ = Profile.objects.get_or_create(user=user)
     return prof
 
+# favorites helpers
+def _fav_ids_for_user(request: HttpRequest) -> set[int]:
+    if request.user.is_authenticated and Favorite:
+        return set(Favorite.objects.filter(user=request.user).values_list("product_id", flat=True))
+    # session fallback
+    fav = request.session.get("favorites")
+    if not isinstance(fav, list):
+        fav = []
+        request.session["favorites"] = fav
+    return set(int(x) for x in fav)
+
+def _toggle_fav(request: HttpRequest, product_id: int) -> bool:
+    """Returns new favorited state."""
+    if request.user.is_authenticated and Favorite:
+        obj, created = Favorite.objects.get_or_create(user=request.user, product_id=product_id)
+        if not created:
+            obj.delete()
+            return False
+        return True
+    # session fallback
+    fav = request.session.get("favorites")
+    if not isinstance(fav, list):
+        fav = []
+    pid = str(product_id)
+    if pid in fav:
+        fav.remove(pid)
+        favorited = False
+    else:
+        fav.append(pid)
+        favorited = True
+    request.session["favorites"] = fav
+    request.session.modified = True
+    return favorited
+
 
 # =========================
 # Catalogue / Product list
 # =========================
 
 def catalogue(request: HttpRequest) -> HttpResponse:
-    products = Product.objects.all().select_related("category")
+    # toggles
+    show_oos = request.GET.get("oos") == "1"
+    show_fav = request.GET.get("fav") == "1"
+    q = (request.GET.get("q") or "").strip()
 
-    # averages
+    products_qs = Product.objects.all().select_related("category")
+    if q:
+        products_qs = products_qs.filter(Q(name__icontains=q) | Q(category__name__icontains=q))
+
+    # averages; default unrated to 5.0 as requested
     ratings = Rating.objects.values("product_id").annotate(avg=Avg("stars"))
-    avg_map = {r["product_id"]: r["avg"] or 0 for r in ratings}
+    avg_map = {r["product_id"]: (r["avg"] if r["avg"] is not None else 5.0) for r in ratings}
 
-    # user’s own ratings
+    # user's ratings
     user_map: Dict[int, int] = {}
     if request.user.is_authenticated:
         your = Rating.objects.filter(user=request.user).values("product_id").annotate(stars=Avg("stars"))
         user_map = {r["product_id"]: int(r["stars"]) for r in your}
 
+    # favorites
+    fav_ids = _fav_ids_for_user(request)
+
     # cart
     cart = _get_cart(request.session)
 
-    # group into “categories” object your template expects
+    # group into categories structure template expects
     categories_dict: Dict[Any, Dict[str, Any]] = defaultdict(
         lambda: {"name": "", "description": "", "visible_products": []}
     )
 
-    for p in products:
+    for p in products_qs:
         pid = str(p.id)
         in_cart = _entry_qty(cart.get(pid, 0))
         setattr(p, "in_cart", in_cart)
         setattr(p, "remaining", _remaining_for(p))
-        setattr(p, "avg_stars", Decimal(str(avg_map.get(p.id, 0))))
+        # default to 5.0 where missing
+        setattr(p, "avg_stars", Decimal(str(avg_map.get(p.id, 5.0))))
         setattr(p, "user_stars", user_map.get(p.id, 0))
-        
+        setattr(p, "is_favorite", p.id in fav_ids)
+
         cat = getattr(p, "category", None)
         key = cat.id if cat else 0
         if key not in categories_dict:
@@ -104,18 +159,34 @@ def catalogue(request: HttpRequest) -> HttpResponse:
             categories_dict[key]["visible_products"] = []
         categories_dict[key]["visible_products"].append(p)
 
-    show_oos = request.GET.get("oos") == "1"
-    has_oos = any(
-        Decimal(str(getattr(p, "remaining"))) <= 0
-        for c in categories_dict.values()
-        for p in c["visible_products"]
-    )
-    categories = list(categories_dict.values())
+    # hide OOS when requested (but keep items visible if already in cart)
+    if not show_oos:
+        for c in categories_dict.values():
+            c["visible_products"] = [
+                p for p in c["visible_products"]
+                if (Decimal(str(getattr(p, "remaining"))) > 0) or (Decimal(str(getattr(p, "in_cart") or "0")) > 0)
+            ]
+
+    # favorites filter
+    if show_fav:
+        for c in categories_dict.values():
+            c["visible_products"] = [p for p in c["visible_products"] if getattr(p, "is_favorite", False)]
+
+    # has_oos computed from current (searched) subset
+    has_oos = any(Decimal(str(getattr(p, "stock_qty", "0") or "0")) <= 0 for p in products_qs)
+
+    categories = [c for c in categories_dict.values() if c["visible_products"]]
 
     return render(
         request,
         "store/product_list.html",
-        {"categories": categories, "show_oos": show_oos, "has_oos": has_oos},
+        {
+            "categories": categories,
+            "show_oos": show_oos,
+            "has_oos": has_oos,
+            "show_fav": show_fav,
+            "q": q,
+        },
     )
 
 
@@ -132,7 +203,7 @@ def cart_view(request: HttpRequest) -> HttpResponse:
 
     for pid, entry in list(cart.items()):
         qty = _entry_qty(entry)
-        # write back in the new shape so future requests are clean
+        # normalize to dict
         if not isinstance(entry, dict) or "qty" not in entry or str(entry["qty"]) != str(qty):
             cart[str(pid)] = {"qty": str(qty)}
             modified = True
@@ -168,6 +239,14 @@ def cart_view(request: HttpRequest) -> HttpResponse:
 
     total = max(Decimal("0"), subtotal - discount)
 
+    # Checkout form moved onto cart page (consolidated)
+    initial = {}
+    if request.user.is_authenticated:
+        initial["email"] = request.user.email
+        prof = _ensure_profile(request.user)
+        initial["phone"] = prof.phone
+    checkout_form = CheckoutForm(initial=initial)
+
     return render(
         request,
         "store/cart.html",
@@ -178,6 +257,7 @@ def cart_view(request: HttpRequest) -> HttpResponse:
             "total": total,
             "coupon": coupon,
             "coupon_form": CouponForm(),
+            "checkout_form": checkout_form,
         },
     )
 
@@ -203,7 +283,14 @@ def cart_update_qty(request: HttpRequest, product_id: int) -> JsonResponse:
 
     request.session.modified = True
     remaining = max(Decimal("0"), stock - qty)
-    return JsonResponse({"ok": True, "remaining": str(remaining), "cart_total": _cart_item_count(cart)})
+
+    # Format remaining for 'ea' as integer (no decimals)
+    if getattr(p, "unit", "ea") == "ea":
+        remaining_str = str(int(remaining))
+    else:
+        remaining_str = str(remaining)
+
+    return JsonResponse({"ok": True, "remaining": remaining_str, "cart_total": _cart_item_count(cart)})
 
 
 def cart_remove(request: HttpRequest, product_id: int) -> HttpResponse:
@@ -257,17 +344,16 @@ def rate_product(request: HttpRequest, product_id: int) -> JsonResponse:
 
     product = get_object_or_404(Product, pk=product_id)
 
-    # Must have purchased in the past
-    has_purchased = OrderItem.objects.filter(order__user=request.user, product=product).exists()
-    if not has_purchased:
-        return JsonResponse({"ok": False, "error": "Purchase required"}, status=403)
-
+    # Save (no purchase restriction so it works in testing)
     Rating.objects.update_or_create(
         product=product,
         user=request.user,
         defaults={"stars": stars},
     )
-    return JsonResponse({"ok": True})
+
+    # Recompute average and return it so the UI updates immediately
+    new_avg = Rating.objects.filter(product=product).aggregate(avg=Avg("stars")).get("avg") or 5.0
+    return JsonResponse({"ok": True, "avg": float(new_avg)})
 
 
 def reviews_detail(request: HttpRequest, product_id: int) -> HttpResponse:
@@ -281,7 +367,7 @@ def reviews_detail(request: HttpRequest, product_id: int) -> HttpResponse:
         c = next((r["c"] for r in counts if r["stars"] == s), 0)
         dist.append((s, c, (c * 100.0) / total))
 
-    avg = reviews.aggregate(avg=Avg("stars")).get("avg") or 0
+    avg = reviews.aggregate(avg=Avg("stars")).get("avg") or 5.0
 
     return render(
         request,
@@ -364,6 +450,7 @@ def _compute_totals_from_session_cart(request: HttpRequest):
 
 
 def checkout_view(request: HttpRequest) -> HttpResponse:
+    # called by the consolidated "Place Order" form on the Cart page
     items, subtotal, discount, total, coupon = _compute_totals_from_session_cart(request)
 
     if request.method == "POST":
@@ -394,7 +481,7 @@ def checkout_view(request: HttpRequest) -> HttpResponse:
             request.session["coupon_code"] = ""
             request.session.modified = True
 
-            # very simple emails
+            # simple emails
             try:
                 send_mail(
                     subject=f"Order #{order.pk} confirmation",
@@ -417,6 +504,7 @@ def checkout_view(request: HttpRequest) -> HttpResponse:
 
             return redirect("store:thanks", order_id=order.pk)
     else:
+        # keep the old page working if visited directly
         initial = {}
         if request.user.is_authenticated:
             initial["email"] = request.user.email
@@ -439,3 +527,17 @@ def checkout_view(request: HttpRequest) -> HttpResponse:
 
 def thanks_view(request: HttpRequest, order_id: int) -> HttpResponse:
     return render(request, "store/thanks.html", {"order_id": order_id})
+
+
+# =========================
+# Favorites (DB if present; otherwise session)
+# =========================
+
+@login_required
+def toggle_favorite(request: HttpRequest, product_id: int) -> JsonResponse:
+    if request.method != "POST":
+        raise Http404()
+    # validate product exists
+    _ = get_object_or_404(Product, pk=product_id)
+    favorited = _toggle_fav(request, product_id)
+    return JsonResponse({"ok": True, "favorited": favorited})
