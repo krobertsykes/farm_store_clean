@@ -30,7 +30,7 @@
         {% with imgs=product.images.all %}
           {% if imgs %}
             <div x-data="{ src: '{{ imgs.0.image.url }}' }" class="flex flex-col items-center mb-3">
-              <img :src="src" class="rounded h-44 object-cover {% if rem == '0' and not product.in_cart %}opacity-50{% endif %}">
+              <img :src="src" class="rounded h-44 w-full object-cover {% if rem == '0' and not product.in_cart %}opacity-50{% endif %}">
               {% if imgs|length > 1 %}
                 <div class="flex gap-2 mt-2">
                   {% for pic in imgs %}
@@ -46,7 +46,7 @@
 
         <h3 class="font-bold mb-1">{{ product.name }}</h3>
 
-        {# SALE/REGULAR PRICE DISPLAY #}
+        {# SALE/REGULAR PRICE DISPLAY (kept) #}
         {% if product.sale_price and product.sale_price < product.price %}
           <p class="text-lg font-semibold mb-1">
             <span class="text-gray-500 line-through mr-2">${{ product.price|floatformat:"2" }}</span>
@@ -68,15 +68,58 @@
           </p>
         {% endif %}
 
-        <div class="text-sm text-yellow-700 mb-2">★ {{ product.avg_stars|floatformat:1 }}</div>
+        {# RATINGS: overall avg (click for breakdown) + "your rating" strip #}
+        <div class="mb-2 flex items-center justify-center gap-3">
+          <a href="{% url 'store:reviews_detail' product.id %}"
+             class="text-sm text-yellow-700 underline"
+             title="See rating breakdown and comments">
+             ★ {{ product.avg_stars|floatformat:1 }}
+          </a>
 
-        <p class="text-sm mb-4">
+          {% if user.is_authenticated %}
+            <span class="flex items-center gap-1 text-sm">
+              <span class="text-gray-600">Your:</span>
+              <span class="inline-flex">
+                {% for i in "12345" %}
+                  {% with k=forloop.counter %}
+                    {% if product.user_stars|default:0 >= k %}
+                      <svg class="w-4 h-4" viewBox="0 0 20 20" fill="#F59E0B" aria-hidden="true"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.09 3.355a1 1 0 00.95.69h3.527c.969 0 1.371 1.24.588 1.81l-2.855 2.074a1 1 0 00-.364 1.118l1.09 3.356c.3.921-.755 1.688-1.54 1.118l-2.855-2.074a1 1 0 00-1.176 0l-2.855 2.074c-.784.57-1.838-.197-1.539-1.118l1.09-3.356a1 1 0 00-.364-1.118L2.844 8.782c-.783-.57-.38-1.81.588-1.81h3.527a1 1 0 00.95-.69l1.09-3.355z"/></svg>
+                    {% else %}
+                      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="#F59E0B"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.62L12 2 9.19 8.62 2 9.24l5.46 4.73L5.82 21z"/></svg>
+                    {% endif %}
+                  {% endwith %}
+                {% endfor %}
+              </span>
+            </span>
+          {% endif %}
+        </div>
+
+        {# CLICKABLE 5-STAR INPUT (server enforces must-be-logged-in + must-have-purchased) #}
+        {% if user.is_authenticated %}
+          <div class="mt-1 flex items-center justify-center gap-1" aria-label="Rate this product">
+            {% for i in "12345" %}
+              {% with k=forloop.counter %}
+              <button type="button" class="rate-btn" data-pid="{{ product.id }}" data-stars="{{ k }}"
+                      title="Set {{ k }} star{% if k != 1 %}s{% endif %}">
+                {% if product.user_stars|default:0 >= k %}
+                  <svg class="w-5 h-5" viewBox="0 0 20 20" fill="#F59E0B"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.09 3.355a1 1 0 00.95.69h3.527c.969 0 1.371 1.24.588 1.81l-2.855 2.074a1 1 0 00-.364 1.118l1.09 3.356c.3.921-.755 1.688-1.54 1.118l-2.855-2.074a1 1 0 00-1.176 0l-2.855 2.074c-.784.57-1.838-.197-1.539-1.118l1.09-3.356a1 1 0 00-.364-1.118L2.844 8.782c-.783-.57-.38-1.81.588-1.81h3.527a1 1 0 00.95-.69l1.09-3.355z"/></svg>
+                {% else %}
+                  <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="#F59E0B"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.62L12 2 9.19 8.62 2 9.24l5.46 4.73L5.82 21z"/></svg>
+                {% endif %}
+              </button>
+              {% endwith %}
+            {% endfor %}
+          </div>
+        {% endif %}
+
+        <p class="text-sm mb-4 mt-2">
           Remaining: <span class="remain">{{ rem }}</span>
           {% if product.unit != 'ea' and rem != '0' %}
             {% if product.unit == 'lb' %}/lb{% elif product.unit == 'oz' %}/oz{% elif product.unit == 'kg' %}/kg{% endif %}
           {% endif %}
         </p>
 
+        {# IMPORTANT: keep controls visible if user has some in cart, even when remaining == 0 #}
         {% if rem != '0' or product.in_cart > 0 %}
         <form class="add-form relative flex items-center justify-center gap-2"
               data-pid="{{ product.id }}"
@@ -126,20 +169,6 @@
           {% endif %}
         </form>
         {% endif %}
-
-        {% if user.is_authenticated %}
-          <form method="post" action="{% url 'store:rate_product' product.id %}" class="mt-3 flex items-center gap-2 justify-center">
-            {% csrf_token %}
-            <label class="text-sm">Rate:</label>
-            <select name="stars" class="border rounded px-2 py-1 text-sm">
-              {% for i in "12345" %}
-                <option value="{{ forloop.counter }}">{{ forloop.counter }}</option>
-              {% endfor %}
-            </select>
-            <input type="text" name="text" placeholder="(optional comment)" class="border rounded px-2 py-1 text-sm w-40">
-            <button class="bg-green-600 hover:bg-green-700 text-white rounded px-3 py-1 text-sm">Save</button>
-          </form>
-        {% endif %}
       </div>
       {% endwith %}
     {% endfor %}
@@ -155,6 +184,31 @@
     return fetch(url,{ method:'POST', headers:{'X-CSRFToken':getCSRF(),'X-Requested-With':'XMLHttpRequest'}, body:data }).then(r=>r.json());
   }
 
+  // Clickable star rating (logged-in users). Server enforces "must have purchased".
+  document.querySelectorAll('.rate-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const pid = btn.dataset.pid, stars = btn.dataset.stars;
+      fetch(`/product/${pid}/rate/`, {
+        method: 'POST',
+        headers: {'X-CSRFToken': getCSRF(), 'X-Requested-With':'XMLHttpRequest'},
+        body: new URLSearchParams({stars})
+      }).then(()=>{
+        // Optimistic fill update
+        const wrap = btn.parentElement;
+        wrap.querySelectorAll('.rate-btn').forEach(b=>{
+          const k = parseInt(b.dataset.stars,10);
+          const svg = b.querySelector('svg');
+          if(k <= parseInt(stars,10)){
+            svg.setAttribute('fill','#F59E0B'); svg.setAttribute('stroke','none');
+          }else{
+            svg.setAttribute('fill','none'); svg.setAttribute('stroke','#F59E0B');
+          }
+        });
+      });
+    });
+  });
+
+  // Your original add-to-cart JS (unchanged)
   document.querySelectorAll('.add-form').forEach(form=>{
     const pid   = form.dataset.pid;
     const unit  = form.dataset.unit;

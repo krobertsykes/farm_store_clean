@@ -1,64 +1,95 @@
+from __future__ import annotations
+
 from decimal import Decimal
 from django.conf import settings
+from django.contrib.auth.models import User
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.db import models
 from django.utils import timezone
-from products.models import Product
 
-User = settings.AUTH_USER_MODEL
 
 class Profile(models.Model):
-    user  = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
-    phone = models.CharField(max_length=32, blank=True)
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    phone = models.CharField(max_length=30, blank=True)
+    # For new-customer 10% discount
+    signup_discount_ends_at = models.DateTimeField(null=True, blank=True)
 
-    def __str__(self):
-        return f"Profile({self.user})"
+    def __str__(self) -> str:
+        return f"Profile({self.user_id})"
 
 
 class Coupon(models.Model):
-    code        = models.CharField(max_length=40, unique=True)
-    description = models.CharField(max_length=120, blank=True)
-    percent_off = models.PositiveSmallIntegerField(null=True, blank=True)   # e.g., 10 = 10%
-    amount_off  = models.DecimalField(max_digits=7, decimal_places=2, null=True, blank=True)  # fixed $
-    active      = models.BooleanField(default=True)
-    expires_at  = models.DateTimeField(null=True, blank=True)
+    code = models.CharField(max_length=50, unique=True)
+    percent_off = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0"))
+    amount_off = models.DecimalField(max_digits=9, decimal_places=2, default=Decimal("0"))
+    start_at = models.DateTimeField(null=True, blank=True)
+    end_at = models.DateTimeField(null=True, blank=True)
+    active = models.BooleanField(default=True)
 
-    def __str__(self):
+    class Meta:
+        ordering = ["-start_at", "code"]
+
+    def __str__(self) -> str:
         return self.code
 
-    def is_valid(self):
-        return self.active and (self.expires_at is None or timezone.now() < self.expires_at)
+    def is_valid_now(self) -> bool:
+        if not self.active:
+            return False
+        now = timezone.now()
+        if self.start_at and now < self.start_at:
+            return False
+        if self.end_at and now > self.end_at:
+            return False
+        return True
+
+    @staticmethod
+    def normalize(code: str) -> str:
+        return (code or "").strip().upper()
 
 
 class Order(models.Model):
-    class PaymentMethod(models.TextChoices):
-        CASH   = 'cash', 'Cash on Pickup'
-        STRIPE = 'stripe', 'Card (Stripe - demo)'
-        PAYPAL = 'paypal', 'PayPal (demo)'
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    email = models.EmailField()
+    phone = models.CharField(max_length=30, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    coupon = models.ForeignKey(Coupon, null=True, blank=True, on_delete=models.SET_NULL)
+    subtotal = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    discount_total = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    total = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    payment_method = models.CharField(max_length=40, default="card")  # placeholder
 
-    user        = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='orders')
-    guest_email = models.EmailField(blank=True)  # used if user is None
-    phone       = models.CharField(max_length=32, blank=True)
-    created_at  = models.DateTimeField(auto_now_add=True)
-    coupon      = models.ForeignKey(Coupon, on_delete=models.SET_NULL, null=True, blank=True)
-    payment_method = models.CharField(max_length=12, choices=PaymentMethod.choices, default=PaymentMethod.CASH)
-    paid        = models.BooleanField(default=False)
-    subtotal    = models.DecimalField(max_digits=9, decimal_places=2, default=0)
-    discount    = models.DecimalField(max_digits=9, decimal_places=2, default=0)
-    total       = models.DecimalField(max_digits=9, decimal_places=2, default=0)
+    class Meta:
+        ordering = ["-created_at"]
 
-    def __str__(self):
-        ident = self.id or "new"
-        who = self.user.email if self.user else self.guest_email
-        return f"Order #{ident} for {who}"
+    def __str__(self) -> str:
+        return f"Order #{self.pk}"
 
 
 class OrderItem(models.Model):
-    order    = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='items')
-    product  = models.ForeignKey(Product, on_delete=models.PROTECT)
-    qty      = models.DecimalField(max_digits=7, decimal_places=2)
-    unit     = models.CharField(max_length=2)  # snapshot of product.unit
-    price    = models.DecimalField(max_digits=7, decimal_places=2)  # effective price at order time
-    line_total = models.DecimalField(max_digits=9, decimal_places=2)
+    from products.models import Product  # local import to avoid circular at module import
 
-    def __str__(self):
-        return f"{self.product.name} x {self.qty}"
+    order = models.ForeignKey(Order, related_name="items", on_delete=models.CASCADE)
+    product = models.ForeignKey("products.Product", on_delete=models.PROTECT)
+    qty = models.DecimalField(max_digits=10, decimal_places=3, validators=[MinValueValidator(Decimal("0"))])
+    unit = models.CharField(max_length=8, default="ea")
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    line_total = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+
+    def __str__(self) -> str:
+        return f"{self.product} x {self.qty}"
+
+
+class Rating(models.Model):
+    product = models.ForeignKey("products.Product", related_name="ratings", on_delete=models.CASCADE)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="ratings", on_delete=models.CASCADE)
+    stars = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    text = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [("product", "user")]
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.product_id}:{self.user_id} → {self.stars}"

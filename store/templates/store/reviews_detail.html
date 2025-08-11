@@ -1,0 +1,39 @@
+{% extends "store/base.html" %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-4">Reviews for {{ product.name }}</h1>
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+  <!-- Score & distribution -->
+  <div class="md:col-span-1 p-4 rounded bg-white shadow">
+    <div class="text-4xl font-bold">★ {{ product.avg_rating|floatformat:1 }}</div>
+    <div class="mt-3 space-y-1">
+      {% for s, count, pct in breakdown %}
+        <div class="flex items-center gap-2">
+          <div class="w-10 text-sm">{{ s }}★</div>
+          <div class="flex-1 bg-gray-200 rounded h-2">
+            <div class="bg-yellow-500 h-2 rounded" style="width: {{ pct|floatformat:0 }}%;"></div>
+          </div>
+          <div class="w-12 text-right text-sm">{{ count }}</div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Comments -->
+  <div class="md:col-span-2 space-y-4">
+    {% for r in reviews %}
+      <div class="bg-white p-4 rounded shadow">
+        <div class="text-sm text-gray-600">{{ r.user.email|default:r.user.username }} — {{ r.created_at|date:"M j, Y" }}</div>
+        <div class="text-yellow-600 mt-1">
+          {% for _ in "12345" %}
+            {% if forloop.counter <= r.stars %}★{% else %}☆{% endif %}
+          {% endfor %}
+        </div>
+        {% if r.text %}<div class="mt-2">{{ r.text }}</div>{% endif %}
+      </div>
+    {% empty %}
+      <p>No reviews yet.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

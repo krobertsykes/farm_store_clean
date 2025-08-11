@@ -1,26 +1,39 @@
-<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><title>My Orders</title></head>
-<body>
-  <h1>My Orders</h1>
-  {% if orders %}
+{% extends "store/base.html" %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-4">Your past orders</h1>
+
+{% if not orders %}
+  <div class="p-6 rounded border-2 border-dashed text-gray-400 bg-gray-50">
+    No past orders yet.
+  </div>
+{% else %}
+  <div class="space-y-4">
     {% for order in orders %}
-      <section>
-        <h3>Order #{{ order.id }} — {{ order.created_at|date:"M d, Y H:i" }} — ${{ order.total }}</h3>
-        <ul>
+      <div class="bg-white rounded shadow p-4">
+        <div class="flex justify-between items-center">
+          <div class="font-semibold">Order #{{ order.id }}</div>
+          <div class="text-sm text-gray-600">{{ order.created_at|date:"M j, Y, g:ia" }}</div>
+        </div>
+        <div class="mt-2 text-sm text-gray-700">
           {% for it in order.items.all %}
-            <li>
-              {% if it.product.images.all %}
-                <img src="{{ it.product.images.all.0.image.url }}" style="height:32px;width:32px;vertical-align:middle;object-fit:cover;">
-              {% endif %}
-              {{ it.product.name }} × {{ it.qty }} @ ${{ it.price }} = ${{ it.line_total }}
-            </li>
+            <div class="flex items-center gap-3 py-1">
+              {% with pic=it.product.images.first %}
+                {% if pic %}
+                  <img src="{{ pic.image.url }}" class="w-10 h-10 rounded object-cover" alt="">
+                {% endif %}
+              {% endwith %}
+              <div class="flex-1">
+                {{ it.product.name }} — {{ it.qty }} {{ it.unit }}
+              </div>
+              <div>${{ it.line_total|floatformat:"2" }}</div>
+            </div>
           {% endfor %}
-        </ul>
-      </section>
+        </div>
+        <div class="mt-3 flex justify-end font-semibold">
+          Total: ${{ order.total|floatformat:"2" }}
+        </div>
+      </div>
     {% endfor %}
-  {% else %}
-    <p>No orders yet.</p>
-  {% endif %}
-</body>
-</html>
+  </div>
+{% endif %}
+{% endblock %}

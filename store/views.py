@@ -1,341 +1,441 @@
+from __future__ import annotations
+
+from collections import defaultdict
 from decimal import Decimal
+from typing import Dict, Any, List, Tuple
+
 from django.conf import settings
 from django.contrib import messages
+from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.mail import send_mail
-from django.http import JsonResponse, HttpResponseBadRequest
+from django.db.models import Avg, Count
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views import View
-from django.views.generic import ListView, TemplateView
-from products.models import Category, Product, ProductReview
-from .models import Order, OrderItem, Coupon, Profile
-from .forms import SignupForm, ProfileForm, ReviewForm, CheckoutForm, CouponForm
+from django.utils import timezone
 
-def _cart(session):
-    return session.setdefault("cart", {})
+from products.models import Product
+from .forms import CheckoutForm, CouponForm, ProfileForm, SignupForm
+from .models import Coupon, Order, OrderItem, Profile, Rating
 
-def _cart_total_items(session):
-    return sum(Decimal(q) for q in _cart(session).values())
 
-class CatalogueView(ListView):
-    template_name         = "store/product_list.html"
-    context_object_name   = "categories"
+# =========================
+# Helpers
+# =========================
 
-    def get_queryset(self):
-        return Category.objects.prefetch_related("products__images").all()
+def _get_cart(session) -> Dict[str, Dict[str, Any]]:
+    """Ensure cart in session is a dict; create if missing/invalid."""
+    cart = session.get("cart")
+    if not isinstance(cart, dict):
+        cart = {}
+        session["cart"] = cart
+    return cart
 
-    def get_context_data(self, **kwargs):
-        ctx    = super().get_context_data(**kwargs)
-        sess   = self.request.session
-        cart   = _cart(sess)
-
-        has_oos = any(
-            p.stock_qty <= 0
-            for cat in ctx["categories"] for p in cat.products.all()
-        )
-
-        oos_param = self.request.GET.get("oos")
-        if oos_param is not None:
-            desired = (oos_param == "1")
-            show_oos = desired and has_oos
-            sess["show_oos"] = show_oos
-        else:
-            show_oos = bool(sess.get("show_oos", False)) and has_oos
-
-        ever_in_stock = set(sess.get("ever_in_stock", []))
-
-        for cat in ctx["categories"]:
-            visible = []
-            for p in cat.products.all():
-                in_cart   = Decimal(cart.get(str(p.pk), "0"))
-                remaining = max(p.stock_qty - in_cart, Decimal("0"))
-
-                p.in_cart   = in_cart
-                p.remaining = remaining
-                p.unit_str  = {"ea": "each", "lb": "/lb", "oz": "/oz", "kg": "/kg"}.get(p.unit, "each")
-                p.avg_stars = round(p.avg_rating or 0, 1)
-
-                if p.stock_qty > 0:
-                    ever_in_stock.add(p.pk)
-
-                if show_oos or remaining > 0 or in_cart > 0 or (p.pk in ever_in_stock):
-                    visible.append(p)
-            cat.visible_products = visible
-
-        sess["ever_in_stock"] = list(ever_in_stock)
-        sess.modified = True
-
-        ctx.update({
-            "show_oos":        show_oos,
-            "has_oos":         has_oos,
-            "weight_choices":  [Decimal("0.25"), Decimal("0.5"), Decimal("1"), Decimal("2"), Decimal("5")],
-            "cart_item_total": _cart_total_items(sess),
-            "review_form":     ReviewForm(),
-        })
-        return ctx
-
-def add_to_cart(request, pk):
-    product = get_object_or_404(Product, pk=pk)
+def _entry_qty(entry) -> Decimal:
+    """Read qty from either new dict shape {'qty': ...} or legacy raw number/string."""
+    if isinstance(entry, dict):
+        return Decimal(str(entry.get("qty", "0") or "0"))
     try:
-        qty = Decimal(request.POST.get("qty", "1"))
+        return Decimal(str(entry))
     except Exception:
-        return HttpResponseBadRequest("Bad qty")
+        return Decimal("0")
 
-    if product.unit == "ea":
-        if qty < 1:
-            qty = Decimal("1")
-        qty = Decimal(int(qty))
+def _cart_item_count(cart: Dict[str, Any]) -> str:
+    total = Decimal("0")
+    for entry in cart.values():
+        total += _entry_qty(entry)
+    return str(total)
 
-    cart    = _cart(request.session)
-    current = Decimal(cart.get(str(pk), "0"))
-    allowed = max(product.stock_qty - current, Decimal("0"))
-    qty     = max(Decimal("0"), min(qty, allowed))
+def _effective_price(p: Product) -> Decimal:
+    sp = getattr(p, "sale_price", None)
+    price = getattr(p, "price", Decimal("0"))
+    if sp and sp < price:
+        return sp
+    return price
 
-    if qty > 0:
-        cart[str(pk)] = str(current + qty)
+def _remaining_for(p: Product) -> Decimal:
+    stock = Decimal(str(getattr(p, "stock_qty", "0") or "0"))
+    in_cart = Decimal(str(getattr(p, "in_cart", "0") or "0"))
+    return max(Decimal("0"), stock - in_cart)
+
+def _ensure_profile(user):
+    prof, _ = Profile.objects.get_or_create(user=user)
+    return prof
+
+
+# =========================
+# Catalogue / Product list
+# =========================
+
+def catalogue(request: HttpRequest) -> HttpResponse:
+    products = Product.objects.all().select_related("category")
+
+    # averages
+    ratings = Rating.objects.values("product_id").annotate(avg=Avg("stars"))
+    avg_map = {r["product_id"]: r["avg"] or 0 for r in ratings}
+
+    # user’s own ratings
+    user_map: Dict[int, int] = {}
+    if request.user.is_authenticated:
+        your = Rating.objects.filter(user=request.user).values("product_id").annotate(stars=Avg("stars"))
+        user_map = {r["product_id"]: int(r["stars"]) for r in your}
+
+    # cart
+    cart = _get_cart(request.session)
+
+    # group into “categories” object your template expects
+    categories_dict: Dict[Any, Dict[str, Any]] = defaultdict(
+        lambda: {"name": "", "description": "", "visible_products": []}
+    )
+
+    for p in products:
+        pid = str(p.id)
+        in_cart = _entry_qty(cart.get(pid, 0))
+        setattr(p, "in_cart", in_cart)
+        setattr(p, "remaining", _remaining_for(p))
+        setattr(p, "avg_stars", Decimal(str(avg_map.get(p.id, 0))))
+        setattr(p, "user_stars", user_map.get(p.id, 0))
+        
+        cat = getattr(p, "category", None)
+        key = cat.id if cat else 0
+        if key not in categories_dict:
+            categories_dict[key]["name"] = getattr(cat, "name", "All Products" if key == 0 else str(cat))
+            categories_dict[key]["description"] = getattr(cat, "description", "")
+            categories_dict[key]["visible_products"] = []
+        categories_dict[key]["visible_products"].append(p)
+
+    show_oos = request.GET.get("oos") == "1"
+    has_oos = any(
+        Decimal(str(getattr(p, "remaining"))) <= 0
+        for c in categories_dict.values()
+        for p in c["visible_products"]
+    )
+    categories = list(categories_dict.values())
+
+    return render(
+        request,
+        "store/product_list.html",
+        {"categories": categories, "show_oos": show_oos, "has_oos": has_oos},
+    )
+
+
+# =========================
+# Cart
+# =========================
+
+def cart_view(request: HttpRequest) -> HttpResponse:
+    cart = _get_cart(request.session)
+
+    items: List[Dict[str, Any]] = []
+    subtotal = Decimal("0")
+    modified = False  # normalize legacy entries to {'qty': '<num>'}
+
+    for pid, entry in list(cart.items()):
+        qty = _entry_qty(entry)
+        # write back in the new shape so future requests are clean
+        if not isinstance(entry, dict) or "qty" not in entry or str(entry["qty"]) != str(qty):
+            cart[str(pid)] = {"qty": str(qty)}
+            modified = True
+
+        p = get_object_or_404(Product, pk=int(pid))
+        unit_price = _effective_price(p)
+        line_total = (unit_price * qty).quantize(Decimal("0.01"))
+
+        items.append(
+            {
+                "product": p,
+                "qty": qty,
+                "remaining": max(Decimal("0"), Decimal(str(getattr(p, "stock_qty", 0))) - qty),
+                "line_total": line_total,
+                "unit_price": unit_price,
+            }
+        )
+        subtotal += line_total
+
+    if modified:
         request.session.modified = True
 
-    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-        new_abs   = Decimal(cart.get(str(pk), "0"))
-        remaining = max(product.stock_qty - new_abs, Decimal("0"))
-        total_qty = _cart_total_items(request.session)
-        return JsonResponse({
-            "ok":         True,
-            "remaining":  str(remaining),
-            "in_cart":    str(new_abs),
-            "cart_total": str(total_qty),
-        })
+    # Coupon
+    discount = Decimal("0")
+    coupon = None
+    code = request.session.get("coupon_code") or ""
+    if code:
+        coupon = Coupon.objects.filter(code=code).first()
+        if coupon and coupon.is_valid_now():
+            if coupon.percent_off:
+                discount += (subtotal * (coupon.percent_off / Decimal("100"))).quantize(Decimal("0.01"))
+            discount += coupon.amount_off
 
-    return redirect("store:catalogue")
+    total = max(Decimal("0"), subtotal - discount)
 
-def remove_from_cart(request, pk):
-    _cart(request.session).pop(str(pk), None)
+    return render(
+        request,
+        "store/cart.html",
+        {
+            "items": items,
+            "subtotal": subtotal,
+            "discount": discount,
+            "total": total,
+            "coupon": coupon,
+            "coupon_form": CouponForm(),
+        },
+    )
+
+
+def cart_update_qty(request: HttpRequest, product_id: int) -> JsonResponse:
+    if request.method != "POST":
+        raise Http404()
+
+    cart = _get_cart(request.session)
+    qty = Decimal(str(request.POST.get("qty", "0") or "0"))
+    qty = max(Decimal("0"), qty)
+
+    p = get_object_or_404(Product, pk=product_id)
+    stock = Decimal(str(getattr(p, "stock_qty", "0") or "0"))
+
+    if qty > stock:
+        qty = stock
+
+    if qty == 0:
+        cart.pop(str(product_id), None)
+    else:
+        cart[str(product_id)] = {"qty": str(qty)}  # normalized shape
+
+    request.session.modified = True
+    remaining = max(Decimal("0"), stock - qty)
+    return JsonResponse({"ok": True, "remaining": str(remaining), "cart_total": _cart_item_count(cart)})
+
+
+def cart_remove(request: HttpRequest, product_id: int) -> HttpResponse:
+    cart = _get_cart(request.session)
+    cart.pop(str(product_id), None)
     request.session.modified = True
     return redirect("store:cart")
 
-def update_qty(request, pk):
-    cart = _cart(request.session)
-    try:
-        qty = Decimal(request.POST.get("qty", "0"))
-    except Exception:
-        return HttpResponseBadRequest("Bad qty")
-    product = get_object_or_404(Product, pk=pk)
 
-    if product.unit == "ea" and qty > 0:
-        qty = Decimal(int(qty))
+# =========================
+# Coupons
+# =========================
 
-    if qty <= 0:
-        cart.pop(str(pk), None)
-        new_abs  = Decimal("0")
-        remaining = product.stock_qty
-    else:
-        qty = min(qty, product.stock_qty)
-        cart[str(pk)] = str(qty)
-        new_abs  = qty
-        remaining = max(product.stock_qty - qty, Decimal("0"))
+def apply_coupon(request: HttpRequest) -> HttpResponse:
+    if request.method != "POST":
+        return redirect("store:cart")
+    form = CouponForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "Invalid coupon.")
+        return redirect("store:cart")
+    code_norm = form.cleaned_data["code"]
+    c = Coupon.objects.filter(code__iexact=code_norm).first()
+    if not c:
+        messages.error(request, "Coupon not found.")
+        request.session["coupon_code"] = ""
+        return redirect("store:cart")
+    if not c.is_valid_now():
+        messages.error(request, "Coupon is expired or not yet active.")
+        request.session["coupon_code"] = ""
+        return redirect("store:cart")
 
-    request.session.modified = True
-    total_qty = _cart_total_items(request.session)
+    request.session["coupon_code"] = c.code  # store canonical casing
+    messages.success(request, f"Applied coupon {c.code}.")
+    return redirect("store:cart")
 
-    return JsonResponse({
-        "ok":         True,
-        "remaining":  str(remaining),
-        "in_cart":    str(new_abs),
-        "cart_total": str(total_qty),
-    })
 
-class CartView(View):
-    template_name = "store/cart.html"
-
-    def get(self, request):
-        cart     = _cart(request.session)
-        products = Product.objects.filter(pk__in=cart.keys()).prefetch_related("images")
-
-        items, subtotal = [], Decimal("0")
-        for p in products:
-            qty       = Decimal(cart[str(p.pk)])
-            remaining = max(p.stock_qty - qty, Decimal("0"))
-            unit_price = p.effective_price
-            line_tot  = unit_price * qty
-            subtotal += line_tot
-            items.append({
-                "product":    p,
-                "qty":        qty,
-                "remaining":  remaining,
-                "unit_price": unit_price,
-                "line_total": line_tot,
-            })
-
-        coupon_code = request.session.get("coupon_code")
-        discount    = Decimal("0")
-        coupon_obj  = None
-        if coupon_code:
-            try:
-                coupon_obj = Coupon.objects.get(code__iexact=coupon_code)
-                if coupon_obj.is_valid():
-                    if coupon_obj.amount_off:
-                        discount += Decimal(coupon_obj.amount_off)
-                    if coupon_obj.percent_off:
-                        discount += (subtotal * Decimal(coupon_obj.percent_off) / Decimal(100))
-                else:
-                    messages.warning(request, "Coupon is not valid.")
-            except Coupon.DoesNotExist:
-                request.session.pop("coupon_code", None)
-
-        total = max(Decimal("0"), subtotal - discount)
-
-        return render(request, self.template_name, {
-            "items":           items,
-            "subtotal":        subtotal,
-            "discount":        discount,
-            "total":           total,
-            "coupon":          coupon_obj,
-            "coupon_form":     CouponForm(initial={"code": coupon_code} if coupon_code else None),
-        })
+# =========================
+# Ratings
+# =========================
 
 @login_required
-def rate_product(request, pk):
-    product = get_object_or_404(Product, pk=pk)
+def rate_product(request: HttpRequest, product_id: int) -> JsonResponse:
+    if request.method != "POST":
+        raise Http404()
+    try:
+        stars = int(request.POST.get("stars", 0))
+    except Exception:
+        stars = 0
+    if stars < 1 or stars > 5:
+        return JsonResponse({"ok": False, "error": "Invalid rating"}, status=400)
+
+    product = get_object_or_404(Product, pk=product_id)
+
+    # Must have purchased in the past
+    has_purchased = OrderItem.objects.filter(order__user=request.user, product=product).exists()
+    if not has_purchased:
+        return JsonResponse({"ok": False, "error": "Purchase required"}, status=403)
+
+    Rating.objects.update_or_create(
+        product=product,
+        user=request.user,
+        defaults={"stars": stars},
+    )
+    return JsonResponse({"ok": True})
+
+
+def reviews_detail(request: HttpRequest, product_id: int) -> HttpResponse:
+    product = get_object_or_404(Product, pk=product_id)
+    reviews = Rating.objects.filter(product=product).select_related("user")
+
+    counts = Rating.objects.filter(product=product).values("stars").annotate(c=Count("id"))
+    total = sum(r["c"] for r in counts) or 1
+    dist: List[Tuple[int, int, float]] = []
+    for s in range(5, 0, -1):
+        c = next((r["c"] for r in counts if r["stars"] == s), 0)
+        dist.append((s, c, (c * 100.0) / total))
+
+    avg = reviews.aggregate(avg=Avg("stars")).get("avg") or 0
+
+    return render(
+        request,
+        "store/reviews_detail.html",
+        {"product": product, "reviews": reviews, "avg": avg, "breakdown": dist},
+    )
+
+
+# =========================
+# Auth / Account
+# =========================
+
+def signup_view(request: HttpRequest) -> HttpResponse:
     if request.method == "POST":
-        stars = int(request.POST.get("stars", "5"))
-        text  = request.POST.get("text", "")
-        ProductReview.objects.update_or_create(
-            product=product, user=request.user,
-            defaults={"stars": stars, "text": text}
-        )
-        messages.success(request, "Thanks for your rating!")
-    return redirect("store:catalogue")
-
-class CheckoutView(View):
-    template_name = "store/checkout.html"
-
-    def get(self, request):
-        initial = {}
-        if request.user.is_authenticated:
-            initial["email"] = request.user.email
-            if hasattr(request.user, "profile"):
-                initial["phone"] = request.user.profile.phone
-        return render(request, self.template_name, {"form": CheckoutForm(initial=initial)})
-
-    def post(self, request):
-        form = CheckoutForm(request.POST)
-        cart = _cart(request.session)
-        if not cart:
-            messages.error(request, "Your cart is empty.")
-            return redirect("store:cart")
-
-        if not request.user.is_authenticated and not request.POST.get('email'):
-            messages.error(request, "Please provide an email for guest checkout.")
-            return render(request, self.template_name, {"form": form})
-
-        if form.is_valid():
-            products = Product.objects.filter(pk__in=cart.keys()).prefetch_related("images")
-            if not products:
-                messages.error(request, "Your cart is empty.")
-                return redirect("store:cart")
-
-            items, subtotal = [], Decimal("0")
-            for p in products:
-                qty = Decimal(cart[str(p.pk)])
-                price = p.effective_price
-                line_total = price * qty
-                items.append((p, qty, price, line_total))
-                subtotal += line_total
-
-            coupon = None
-            discount = Decimal("0")
-            coupon_code = request.session.get("coupon_code")
-            if coupon_code:
-                try:
-                    coupon = Coupon.objects.get(code__iexact=coupon_code)
-                    if coupon.is_valid():
-                        if coupon.amount_off:
-                            discount += Decimal(coupon.amount_off)
-                        if coupon.percent_off:
-                            discount += (subtotal * Decimal(coupon.percent_off) / Decimal(100))
-                except Coupon.DoesNotExist:
-                    coupon = None
-
-            total = max(Decimal("0"), subtotal - discount)
-
-            order = Order.objects.create(
-                user = request.user if request.user.is_authenticated else None,
-                guest_email = None if request.user.is_authenticated else form.cleaned_data.get("email"),
-                phone = form.cleaned_data.get("phone") or "",
-                coupon = coupon,
-                payment_method = form.cleaned_data['payment_method'],
-                paid = (form.cleaned_data['payment_method'] == Order.PaymentMethod.CASH),
-                subtotal = subtotal,
-                discount = discount,
-                total    = total,
-            )
-            for (p, qty, price, line_total) in items:
-                OrderItem.objects.create(
-                    order=order, product=p, qty=qty, unit=p.unit, price=price, line_total=line_total
-                )
-                p.stock_qty = max(Decimal("0"), p.stock_qty - qty)
-                p.save()
-
-            request.session["cart"] = {}
-            request.session.pop("coupon_code", None)
-            request.session.modified = True
-
-            recipient = order.user.email if order.user else order.guest_email
-            subject = f"Order #{order.id} confirmation"
-            body = f"Thanks for your order!\n\nOrder #{order.id}\nTotal: ${order.total}\n"
-            send_mail(subject, body, settings.DEFAULT_FROM_EMAIL, [recipient])
-            send_mail(f"New order #{order.id}", f"Total ${order.total}", settings.DEFAULT_FROM_EMAIL, [settings.ORDER_NOTIFICATION_EMAIL])
-
-            return redirect("store:order_thanks", order_id=order.id)
-
-        return render(request, self.template_name, {"form": form})
-
-def apply_coupon(request):
-    form = CouponForm(request.POST or None)
-    if request.method == "POST" and form.is_valid():
-        request.session["coupon_code"] = form.cleaned_data['code'].strip()
-        request.session.modified = True
-    return redirect("store:cart")
-
-class OrderThankYouView(TemplateView):
-    template_name = "store/thanks.html"
-
-class SignupView(View):
-    template_name = "store/auth/signup.html"
-
-    def get(self, request):
-        return render(request, self.template_name, {"form": SignupForm()})
-
-    def post(self, request):
         form = SignupForm(request.POST)
         if form.is_valid():
-            form.save()
-            messages.success(request, "Account created. Please sign in.")
-            return redirect("accounts:login")
-        return render(request, self.template_name, {"form": form})
+            user = form.save()
+            login(request, user)
+            messages.success(request, "Welcome! Your 10% new-customer discount is active for 30 days.")
+            return redirect("store:catalogue")
+    else:
+        form = SignupForm()
+    return render(request, "store/auth/signup.html", {"form": form})
 
-class ProfileView(LoginRequiredMixin, View):
-    template_name = "store/auth/profile.html"
 
-    def get(self, request):
-        profile, _ = Profile.objects.get_or_create(user=request.user)
-        form = ProfileForm(user=request.user, instance=profile)
-        return render(request, self.template_name, {"form": form})
-
-    def post(self, request):
-        profile, _ = Profile.objects.get_or_create(user=request.user)
-        form = ProfileForm(request.POST, user=request.user, instance=profile)
+@login_required
+def profile_view(request: HttpRequest) -> HttpResponse:
+    prof = _ensure_profile(request.user)
+    if request.method == "POST":
+        form = ProfileForm(request.POST, instance=prof, user=request.user)
         if form.is_valid():
             form.save()
             messages.success(request, "Profile updated.")
             return redirect("accounts:profile")
-        return render(request, self.template_name, {"form": form})
+    else:
+        form = ProfileForm(instance=prof, user=request.user)
+    return render(request, "store/auth/profile.html", {"form": form})
 
-class OrderHistoryView(LoginRequiredMixin, TemplateView):
-    template_name = "store/auth/orders.html"
 
-    def get_context_data(self, **kwargs):
-        ctx = super().get_context_data(**kwargs)
-        ctx["orders"] = (request := self.request).user.orders.prefetch_related("items__product__images").order_by("-created_at")
-        return ctx
+@login_required
+def orders_view(request: HttpRequest) -> HttpResponse:
+    orders = Order.objects.filter(user=request.user).prefetch_related("items__product")
+    return render(request, "store/auth/orders.html", {"orders": orders})
+
+
+# =========================
+# Checkout
+# =========================
+
+def _compute_totals_from_session_cart(request: HttpRequest):
+    cart = _get_cart(request.session)
+    items = []
+    subtotal = Decimal("0")
+    for pid, entry in cart.items():
+        p = get_object_or_404(Product, pk=int(pid))
+        qty = _entry_qty(entry)
+        unit_price = _effective_price(p)
+        line_total = (unit_price * qty).quantize(Decimal("0.01"))
+        items.append((p, qty, unit_price, line_total))
+        subtotal += line_total
+
+    discount = Decimal("0")
+    coupon = None
+    code = request.session.get("coupon_code")
+    if code:
+        coupon = Coupon.objects.filter(code=code).first()
+        if coupon and coupon.is_valid_now():
+            if coupon.percent_off:
+                discount += (subtotal * (coupon.percent_off / Decimal("100"))).quantize(Decimal("0.01"))
+            discount += coupon.amount_off
+
+    # 10% new-customer discount if within 30 days
+    if request.user.is_authenticated:
+        prof = _ensure_profile(request.user)
+        if prof.signup_discount_ends_at and timezone.now() <= prof.signup_discount_ends_at:
+            discount += (subtotal * Decimal("0.10")).quantize(Decimal("0.01"))
+
+    total = max(Decimal("0"), subtotal - discount)
+    return items, subtotal, discount, total, coupon
+
+
+def checkout_view(request: HttpRequest) -> HttpResponse:
+    items, subtotal, discount, total, coupon = _compute_totals_from_session_cart(request)
+
+    if request.method == "POST":
+        form = CheckoutForm(request.POST)
+        if form.is_valid():
+            order = Order.objects.create(
+                user=request.user if request.user.is_authenticated else None,
+                email=form.cleaned_data["email"],
+                phone=form.cleaned_data.get("phone") or "",
+                coupon=coupon,
+                subtotal=subtotal,
+                discount_total=discount,
+                total=total,
+                payment_method=form.cleaned_data["payment_method"],
+            )
+            for p, qty, unit_price, line_total in items:
+                OrderItem.objects.create(
+                    order=order,
+                    product=p,
+                    qty=qty,
+                    unit=getattr(p, "unit", "ea"),
+                    unit_price=unit_price,
+                    line_total=line_total,
+                )
+
+            # clear cart
+            request.session["cart"] = {}
+            request.session["coupon_code"] = ""
+            request.session.modified = True
+
+            # very simple emails
+            try:
+                send_mail(
+                    subject=f"Order #{order.pk} confirmation",
+                    message=f"Thanks for your order #{order.pk}. Total: ${order.total}",
+                    from_email=None,
+                    recipient_list=[order.email],
+                    fail_silently=True,
+                )
+                admin_mail = getattr(settings, "DEFAULT_FROM_EMAIL", None)
+                if admin_mail:
+                    send_mail(
+                        subject=f"New order #{order.pk}",
+                        message=f"Total: ${order.total}",
+                        from_email=None,
+                        recipient_list=[admin_mail],
+                        fail_silently=True,
+                    )
+            except Exception:
+                pass
+
+            return redirect("store:thanks", order_id=order.pk)
+    else:
+        initial = {}
+        if request.user.is_authenticated:
+            initial["email"] = request.user.email
+            prof = _ensure_profile(request.user)
+            initial["phone"] = prof.phone
+        form = CheckoutForm(initial=initial)
+
+    return render(
+        request,
+        "store/checkout.html",
+        {
+            "form": form,
+            "subtotal": subtotal,
+            "discount": discount,
+            "total": total,
+            "coupon": coupon,
+        },
+    )
+
+
+def thanks_view(request: HttpRequest, order_id: int) -> HttpResponse:
+    return render(request, "store/thanks.html", {"order_id": order_id})

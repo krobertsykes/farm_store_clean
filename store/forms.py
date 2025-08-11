@@ -1,60 +1,79 @@
+from __future__ import annotations
+
+from datetime import timedelta
 from django import forms
-from django.contrib.auth import get_user_model
-from products.models import ProductReview
-from .models import Profile, Order
+from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth.models import User
+from django.utils import timezone
 
-User = get_user_model()
+from .models import Profile, Coupon
 
-class SignupForm(forms.ModelForm):
-    password = forms.CharField(widget=forms.PasswordInput)
-    phone    = forms.CharField(max_length=32, required=False)
+
+class SignupForm(UserCreationForm):
+    email = forms.EmailField(required=True)
+    phone = forms.CharField(required=False)
 
     class Meta:
-        model  = User
-        fields = ('email', 'password')
-
-    def clean_email(self):
-        email = self.cleaned_data['email'].strip().lower()
-        if User.objects.filter(email=email).exists():
-            raise forms.ValidationError("An account with this email already exists.")
-        return email
+        model = User
+        fields = ("email", "phone", "password1", "password2")
 
     def save(self, commit=True):
-        user = User(username=self.cleaned_data['email'], email=self.cleaned_data['email'])
-        user.set_password(self.cleaned_data['password'])
+        # Use email as username
+        user = super().save(commit=False)
+        email = self.cleaned_data["email"]
+        user.username = email
+        user.email = email
         if commit:
             user.save()
-            Profile.objects.get_or_create(user=user, defaults={'phone': self.cleaned_data.get('phone', '')})
+            Profile.objects.update_or_create(
+                user=user,
+                defaults={
+                    "phone": self.cleaned_data.get("phone") or "",
+                    "signup_discount_ends_at": timezone.now() + timedelta(days=30),
+                },
+            )
         return user
 
+
 class ProfileForm(forms.ModelForm):
-    email = forms.EmailField()
+    email = forms.EmailField(required=True)
+
     class Meta:
-        model  = Profile
-        fields = ('phone',)
+        model = Profile
+        fields = ("phone",)
 
     def __init__(self, *args, **kwargs):
-        self.user = kwargs.pop('user')
+        self.user = kwargs.pop("user")
         super().__init__(*args, **kwargs)
-        self.fields['email'].initial = self.user.email
+        # Initialize email from user
+        self.fields["email"].initial = self.user.email
 
     def save(self, commit=True):
-        self.user.email = self.cleaned_data['email'].strip().lower()
+        prof = super().save(commit=False)
+        self.user.email = self.cleaned_data["email"]
         self.user.username = self.user.email
         if commit:
             self.user.save()
-            return super().save(commit=True)
-        return super().save(commit=False)
+            prof.user = self.user
+            prof.save()
+        return prof
 
-class ReviewForm(forms.ModelForm):
-    class Meta:
-        model  = ProductReview
-        fields = ('stars', 'text')
 
 class CouponForm(forms.Form):
-    code = forms.CharField(max_length=40)
+    code = forms.CharField(max_length=50)
+
+    def clean_code(self):
+        return Coupon.normalize(self.cleaned_data["code"])
+
+
+PAYMENT_CHOICES = [
+    ("card", "Credit/Debit Card"),
+    ("cash", "Cash on pickup"),
+    ("paypal", "PayPal"),
+]
+
 
 class CheckoutForm(forms.Form):
-    email   = forms.EmailField(required=False)  # required for guests
-    phone   = forms.CharField(max_length=32, required=False)
-    payment_method = forms.ChoiceField(choices=Order.PaymentMethod.choices)
+    email = forms.EmailField()
+    phone = forms.CharField(required=False)
+    payment_method = forms.ChoiceField(choices=PAYMENT_CHOICES)

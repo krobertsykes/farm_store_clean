@@ -1,0 +1,18 @@
+{% extends "store/base.html" %}
+{% block title %}Orders{% endblock %}
+{% block content %}
+<h1>Your Orders</h1>
+{% for o in orders %}
+  <div style="margin-bottom:1rem;padding:0.5rem;border:1px solid #ddd">
+    <div><strong>Order #{{ o.id }}</strong> – {{ o.created_at }}</div>
+    <ul>
+      {% for it in o.items.all %}
+        <li>{{ it.name_snapshot }} — {{ it.qty }} {{ it.unit }} @ ${{ it.unit_price }} (=${{ it.line_total }})</li>
+      {% endfor %}
+    </ul>
+    <div>Subtotal: ${{ o.subtotal }} | Discount: ${{ o.discount }} | Total: <strong>${{ o.total }}</strong></div>
+  </div>
+{% empty %}
+  <p>No orders yet.</p>
+{% endfor %}
+{% endblock %}

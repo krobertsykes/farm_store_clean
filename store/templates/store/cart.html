@@ -177,6 +177,12 @@ document.querySelectorAll(".qty-input").forEach(inp => {
 
         // Subtotal/Total recalc on the client
         recalcTotals();
+
+        // NEW: also update header cart count using server's cart_total
+        const cartCount = document.getElementById("cart-count");
+        if (cartCount && typeof js.cart_total !== "undefined") {
+          cartCount.textContent = js.cart_total;
+        }
       });
     }, 250);
   });
