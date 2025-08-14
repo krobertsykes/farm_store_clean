@@ -1,32 +1,51 @@
 # Python cache
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
 
 # C extensions
 *.so
+*.dll
 
 # Virtual environments
 .venv/
 venv/
 env/
 
-# Environment variables
+# Environment variables / secrets
 .env
 .env.*
+!.env.example
 
-# Django-specific
+# Django
 db.sqlite3
+*.log
+logs/
+# Uploaded files (keep out of Git)
 media/
+# Collected static (STATIC_ROOT)
 staticfiles/
 
-# IDE / editor files
+# Coverage / testing / lint caches
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.pytest_cache/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# Editors / OS
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# macOS
 .DS_Store
-
-# Windows
 Thumbs.db
+
+# Node (only if you ever add a frontend build)
+node_modules/
