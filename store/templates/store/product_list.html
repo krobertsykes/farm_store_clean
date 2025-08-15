@@ -219,10 +219,9 @@
           if(on){ onEl?.classList.remove('hidden'); offEl?.classList.add('hidden'); }
           else { offEl?.classList.remove('hidden'); onEl?.classList.add('hidden'); }
 
-          // If we're filtered to favorites (fav=1) and user unfavorites, hide the card
+          // If filtered to favorites, hide the card when unfavorited
           if(!on && new URLSearchParams(location.search).get('fav') === '1'){
             const card = btn.closest('[id^="prod-"]'); card?.classList.add('opacity-50');
-            // remove after a short delay for a nicer feel
             setTimeout(()=>{ card?.remove(); }, 150);
           }
         })
@@ -241,7 +240,6 @@
       })
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(js=>{
-        // Fill up to selected
         const wrap = btn.parentElement;
         wrap.querySelectorAll('.rate-btn').forEach(b=>{
           const k = parseInt(b.dataset.stars,10);
@@ -252,17 +250,16 @@
             svg.setAttribute('fill','none'); svg.setAttribute('stroke','#F59E0B');
           }
         });
-        // Update average number if server returned it
         const avgEl = document.querySelector(`.avg-stars[data-pid="${pid}"]`);
         if(js && js.ok && typeof js.avg !== 'undefined' && avgEl){
           const v = Math.round(Number(js.avg)*10)/10;
           avgEl.textContent = v.toFixed(1);
         }
-      }).catch(()=>{ /* ignore if server rejected (e.g., not purchased) */ });
+      }).catch(()=>{ /* ignore if server rejected */ });
     });
   });
 
-  // --- Cart controls (unchanged logic, but anchored to data-stock) ---
+  // --- Cart controls (with YCPS open+sticky + caret toggle + Esc/outside close) ---
   document.querySelectorAll('.add-form').forEach(form=>{
     const pid   = form.dataset.pid;
     const unit  = form.dataset.unit;
@@ -294,6 +291,7 @@
     const addBtn = confirm ? confirm.querySelector('.btn-add') : null;
 
     let pickToAdd = 0;
+    let panelSticky = false; // keep the list open when opened via YCPS
 
     function remaining(){ return Math.max(0, stock - inCart); }
     function stepInfo(){
@@ -355,16 +353,60 @@
       syncUI();
     }
 
+    function buildAndOpenList(sticky=false){
+      if(unit==='ea') return;
+      panel.innerHTML = '';
+      const {step, hard} = stepInfo();
+      const end = Math.min(stock, hard);
+      if(end <= 0){ panel.classList.add('hidden'); return; }
+
+      for(let q=step; q<=end + 1e-9; q=Math.round((q+step)*1000)/1000){
+        const row = document.createElement('button');
+        row.type='button';
+        row.className='block w-full text-left px-3 py-2 hover:bg-yellow-100';
+        row.textContent = fmtQty(q);
+        row.addEventListener('mouseenter', ()=>{
+          const hp = panel.querySelector('.hover-price'); if(hp) hp.textContent = `$${(price*q).toFixed(2)}`;
+        });
+        row.addEventListener('click', ()=>{
+          pickToAdd = Math.min(q, Math.max(0, stock - inCart));
+          panel.classList.add('hidden');
+          confirm.classList.remove('hidden');
+          chosen.textContent = fmtQty(pickToAdd);
+          est.textContent = `$${(price*pickToAdd).toFixed(2)}`;
+          panelSticky = false; // once picked, allow outside click to close confirm
+        });
+        panel.appendChild(row);
+      }
+      const footer = document.createElement('div'); footer.className='px-3 py-2 text-sm text-gray-700 border-t';
+      footer.innerHTML = `<div>Total est. price: <span class="hover-price font-semibold">$${(price*stepInfo().step).toFixed(2)}</span></div><div class="text-gray-500">Final cost by actual weight</div>`;
+      panel.appendChild(footer);
+
+      panel.classList.remove('hidden');
+      confirm.classList.add('hidden');
+      panelSticky = sticky;
+    }
+
     syncUI();
 
+    // YCPS: 'ea' increments; by-weight opens list and keeps it open
     ycps?.addEventListener('click', e=>{
       e.preventDefault();
-      const {step} = stepInfo();
-      const target = Math.min(stock, inCart + step);
-      if(target === inCart) return;
-      postUpdateQty(url, target).then(js=>{ if(js?.ok) applyServer(target, js); });
+      if(unit === 'ea'){
+        const target = Math.min(stock, inCart + 1);
+        if(target === inCart) return;
+        postUpdateQty(url, target).then(js=>{ if(js?.ok) applyServer(target, js); });
+      }else{
+        // If already open, just ensure it stays sticky-open
+        if (!panel.classList.contains('hidden')) {
+          panelSticky = true;
+          return;
+        }
+        buildAndOpenList(true); // sticky open
+      }
     });
 
+    // Each stepper
     inc?.addEventListener('click', e=>{
       e.preventDefault();
       const target = Math.min(stock, inCart + 1);
@@ -379,27 +421,14 @@
 
     function weightStep(){ return stepInfo().step; }
 
+    // Down arrow toggles the list (non-sticky)
     wcaret?.addEventListener('click', ()=>{
-      panel.innerHTML = '';
-      const {step, hard} = stepInfo();
-      const end = Math.min(stock, hard);
-      if(end <= 0){ panel.classList.add('hidden'); return; }
-      for(let q=step; q<=end + 1e-9; q=Math.round((q+step)*1000)/1000){
-        const row = document.createElement('button'); row.type='button'; row.className='block w-full text-left px-3 py-2 hover:bg-yellow-100'; row.textContent = fmtQty(q);
-        row.addEventListener('mouseenter', ()=>{
-          const hp = panel.querySelector('.hover-price'); if(hp) hp.textContent = `$${(price*q).toFixed(2)}`;
-        });
-        row.addEventListener('click', ()=>{
-          pickToAdd = Math.min(q, Math.max(0, stock - inCart));
-          panel.classList.add('hidden'); confirm.classList.remove('hidden'); chosen.textContent = fmtQty(pickToAdd); est.textContent = `$${(price*pickToAdd).toFixed(2)}`;
-        });
-        panel.appendChild(row);
+      if (!panel.classList.contains('hidden')) {
+        panel.classList.add('hidden');
+        confirm.classList.add('hidden');
+        return;
       }
-      const footer = document.createElement('div'); footer.className='px-3 py-2 text-sm text-gray-700 border-t';
-      footer.innerHTML = `<div>Total est. price: <span class="hover-price font-semibold">$${(price*step).toFixed(2)}</span></div><div class="text-gray-500">Final cost by actual weight</div>`;
-      panel.appendChild(footer);
-
-      panel.classList.remove('hidden'); confirm.classList.add('hidden');
+      buildAndOpenList(false);
     });
 
     addBtn?.addEventListener('click', ()=>{
@@ -418,14 +447,29 @@
       postUpdateQty(url, target).then(js=>{ if(js?.ok) applyServer(target, js); });
     });
 
+    // Close when clicking outside (but not if YCPS made it sticky-open)
     document.addEventListener('click', (ev)=>{
       const listOpen = panel && !panel.classList.contains('hidden');
       const confirmOpen = confirm && !confirm.classList.contains('hidden');
       if(!listOpen && !confirmOpen) return;
       if(form.contains(ev.target)) return;
+
+      if(listOpen && panelSticky){
+        // keep it open when launched via YCPS
+        return;
+      }
+
       if(panel) panel.classList.add('hidden');
       if(confirm) confirm.classList.add('hidden');
-      syncUI();
+    });
+
+    // Esc to collapse list/confirm (also clears sticky)
+    document.addEventListener('keydown', (e)=>{
+      if (e.key === 'Escape') {
+        if(panel && !panel.classList.contains('hidden')) panel.classList.add('hidden');
+        if(confirm && !confirm.classList.contains('hidden')) confirm.classList.add('hidden');
+        panelSticky = false;
+      }
     });
 
     form.addEventListener('submit', e=>e.preventDefault());
