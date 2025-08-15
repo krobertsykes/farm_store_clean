@@ -60,20 +60,27 @@ class ProfileForm(forms.ModelForm):
 
 
 class CouponForm(forms.Form):
-    code = forms.CharField(max_length=50)
+    # Limit to 8 characters and allow blank (so we can "remove" coupon via same endpoint)
+    code = forms.CharField(
+        required=False,
+        max_length=8,
+        widget=forms.TextInput(attrs={"maxlength": 8})
+    )
 
     def clean_code(self):
-        return Coupon.normalize(self.cleaned_data["code"])
+        return Coupon.normalize(self.cleaned_data.get("code", ""))
 
 
+# Payment choices in the requested order
 PAYMENT_CHOICES = [
+    ("cash", "Cash on delivery"),
+    ("venmo", "Venmo"),
+    ("zelle", "Zelle"),
     ("card", "Credit/Debit Card"),
-    ("cash", "Cash on pickup"),
-    ("paypal", "PayPal"),
 ]
 
 
 class CheckoutForm(forms.Form):
-    email = forms.EmailField()
+    email = forms.EmailField()            # required
     phone = forms.CharField(required=False)
     payment_method = forms.ChoiceField(choices=PAYMENT_CHOICES)

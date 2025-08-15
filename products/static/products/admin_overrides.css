@@ -1,0 +1,31 @@
+/* Hide the add/edit/view icons that show next to FK widgets in the admin. */
+.related-widget-wrapper .related-widget-wrapper-link {
+  display: none !important;
+}
+
+/* Tighten number fields a touch on the changelist. */
+.change-list .results input[type="number"] {
+  max-width: 7ch;
+  text-align: right;
+}
+
+/* ─── Additions for inline editing under Category ───────────────────────── */
+
+/* Keep description textareas in inlines from taking over the row height */
+.inline-group .field-description textarea {
+  width: 100%;
+  min-height: 3.5em;
+}
+
+/* Price fields in inlines: match the compact style from changelist */
+.inline-group .field-price input,
+.inline-group .field-sale_price input {
+  max-width: 7ch;
+  text-align: right;
+}
+
+/* Soft warning style for bad sale_price (set via JS) */
+input.is-price-warning {
+  outline: 2px solid #e67e22;
+  background: #fff7ef;
+}

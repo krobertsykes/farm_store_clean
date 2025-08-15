@@ -1,0 +1,25 @@
+{% extends "admin/change_form.html" %}
+{% load i18n %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <style>
+    .category-help {
+      margin: 12px 0 16px;
+      padding: 10px 12px;
+      border-left: 4px solid #4CAF50;
+      background: #f6fff6;
+      border-radius: 6px;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div class="category-help">
+    <strong>Tip:</strong> Edit products for this category directly in the table below.
+    <em>Effective Price</em> shows the computed price (sale if valid, else base).
+  </div>
+  {{ block.super }}
+{% endblock %}
