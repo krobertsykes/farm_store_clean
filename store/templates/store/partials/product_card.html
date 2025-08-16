@@ -1,0 +1,148 @@
+{# Expects: product, rem #}
+<div id="prod-{{ product.id }}"
+     class="relative rounded-lg shadow p-4 text-center {% if rem == '0' and not product.in_cart %}bg-gray-200 text-gray-500{% endif %}">
+
+  {# Favorite heart #}
+  {% if user.is_authenticated %}
+    <button type="button"
+            class="fav-btn absolute top-2 right-2 p-1 rounded-full bg-white/80 hover:bg-white shadow"
+            data-pid="{{ product.id }}"
+            data-fav-url="/favorites/toggle/{{ product.id }}/"
+            aria-pressed="{{ product.is_favorite|yesno:'true,false' }}"
+            title="Toggle favorite">
+      <svg class="heart-on w-6 h-6 {% if not product.is_favorite %}hidden{% endif %}" viewBox="0 0 24 24" fill="#ef4444" aria-hidden="true">
+        <path d="M12 21s-7.5-4.35-10-8.5C-0.5 8.5 2.5 4 6.5 4c2 0 3.5 1 5.5 3 2-2 3.5-3 5.5-3 4 0 7 4.5 4 8.5C19.5 16.65 12 21 12 21z"/>
+      </svg>
+      <svg class="heart-off w-6 h-6 {% if product.is_favorite %}hidden{% endif %}" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" aria-hidden="true">
+        <path d="M20.84 4.61A5.5 5.5 0 0012 8.28a5.5 5.5 0 00-8.84-3.67c-2.6 2.28-2.27 6.32.62 8.5L12 21l8.22-7.89c2.89-2.18 3.22-6.22.62-8.5z" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+  {% endif %}
+
+  {% with imgs=product.images.all %}
+    {% if imgs %}
+      <div x-data="{ src: '{{ imgs.0.image.url }}' }" class="flex flex-col items-center mb-3">
+        <img :src="src" class="rounded h-44 w-full object-cover {% if rem == '0' and not product.in_cart %}opacity-50{% endif %}">
+        <div class="mt-2 h-20">
+          {% if imgs|length > 1 %}
+            <div class="flex gap-2">
+              {% for pic in imgs|slice:":3" %}
+                <img src="{{ pic.image.url }}"
+                     class="w-16 h-16 rounded cursor-pointer border hover:ring-2 hover:ring-green-500"
+                     @click="src='{{ pic.image.url }}'">
+              {% endfor %}
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  <h3 class="font-bold mb-1">{{ product.name }}</h3>
+
+  {# Price #}
+  {% if product.sale_price and product.sale_price < product.price %}
+    <p class="text-lg font-semibold mb-1">
+      <span class="text-gray-500 line-through mr-2">${{ product.price|floatformat:"2" }}</span>
+      <span class="text-red-600">${{ product.sale_price|floatformat:"2" }}</span>
+      {% if product.unit == 'ea' %} each
+      {% elif product.unit == 'lb' %} per pound
+      {% elif product.unit == 'oz' %} per ounce
+      {% elif product.unit == 'kg' %} /kg
+      {% endif %}
+    </p>
+  {% else %}
+    <p class="text-lg font-semibold mb-1">
+      ${{ product.price|floatformat:"2" }}
+      {% if product.unit == 'ea' %} each
+      {% elif product.unit == 'lb' %} per pound
+      {% elif product.unit == 'oz' %} per ounce
+      {% elif product.unit == 'kg' %} /kg
+      {% endif %}
+    </p>
+  {% endif %}
+
+  {# Ratings #}
+  <div class="mb-2 flex items-center justify-center gap-2">
+    {% if user.is_authenticated %}
+      <span class="inline-flex">
+        {% for i in "12345" %}
+          {% with k=forloop.counter %}
+          <button type="button" class="rate-btn" data-pid="{{ product.id }}" data-stars="{{ k }}"
+                  title="Set {{ k }} star{% if k != 1 %}s{% endif %}">
+            {% if product.user_stars|default:0 >= k %}
+              <svg class="w-5 h-5" viewBox="0 0 20 20" fill="#F59E0B"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.09 3.355a1 1 0 00.95.69h3.527c.969 0 1.371 1.24.588 1.81l-2.855 2.074a1 1 0 00-.364 1.118l1.09 3.356c.3.921-.755 1.688-1.54 1.118l-2.855-2.074a1 1 0 00-1.176 0l-2.855 2.074c-.784.57-1.838-.197-1.539-1.118l1.09-3.356a1 1 0 00-.364-1.118L2.844 8.782c-.783-.57-.38-1.81.588-1.81h3.527a1 1 0 00.95-.69l1.09-3.355z"/></svg>
+            {% else %}
+              <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="#F59E0B"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.62L12 2 9.19 8.62 2 9.24l5.46 4.73L5.82 21z"/></svg>
+            {% endif %}
+          </button>
+          {% endwith %}
+        {% endfor %}
+      </span>
+    {% else %}
+      <a href="{% url 'store:reviews_detail' product.id %}" class="text-sm text-yellow-700 underline">Sign in to rate</a>
+    {% endif %}
+
+    <a href="{% url 'store:reviews_detail' product.id %}" class="text-sm text-yellow-700 underline" title="See rating breakdown and comments">
+      (avg <span class="avg-stars" data-pid="{{ product.id }}">{{ product.avg_stars|default:5|floatformat:1 }}</span>)
+    </a>
+  </div>
+
+  <p class="text-sm mb-4 mt-2">
+    Remaining: <span class="remain">{% if product.unit == 'ea' %}{{ rem }}{% else %}{{ product.remaining }}{% endif %}</span>
+    {% if product.unit != 'ea' and rem != '0' %}
+      {% if product.unit == 'lb' %}/lb{% elif product.unit == 'oz' %}/oz{% elif product.unit == 'kg' %}/kg{% endif %}
+    {% endif %}
+  </p>
+
+  {% if rem != '0' or product.in_cart > 0 %}
+  <form class="add-form relative flex items-center justify-center gap-2"
+        data-pid="{{ product.id }}"
+        data-unit="{{ product.unit }}"
+        data-stock="{{ product.stock_qty }}"
+        data-initial-in-cart="{{ product.in_cart|default:0 }}"
+        data-price="{{ product.effective_price }}"
+        data-url-update="{% url 'store:update_qty' product.id %}"
+        method="post">
+    {% csrf_token %}
+
+    <button type="button"
+            class="ycps w-10 h-10 rounded-full bg-yellow-400 hover:bg-yellow-500 active:bg-yellow-600 text-black text-xl font-bold flex items-center justify-center shadow border border-yellow-500"
+            aria-label="Add to cart">+</button>
+
+    {% if product.unit == 'ea' %}
+    <div class="stepper hidden items-center gap-3 px-3 py-1 rounded-full border border-yellow-400 bg-yellow-100">
+      <button type="button" class="btn-dec text-2xl leading-none px-2">−</button>
+      <span class="stepper-count min-w-6 text-lg font-semibold text-black text-center">1</span>
+      <button type="button" class="btn-inc text-2xl leading-none px-2">+</button>
+    </div>
+    {% endif %}
+
+    {% if product.unit != 'ea' %}
+      <div class="weight-stepper hidden flex items-center gap-2 px-3 py-1 rounded-full border border-yellow-400 bg-yellow-100 whitespace-nowrap">
+        <button type="button" class="wdec text-2xl leading-none px-2">−</button>
+        <span class="wqty min-w-12 text-center font-semibold">0</span>
+        <span class="wunit text-sm"></span>
+        <button type="button" class="wcaret px-1" title="Change amount">
+          <svg class="w-4 h-4 opacity-60" viewBox="0 0 20 20" fill="currentColor"><path d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"/></svg>
+        </button>
+        <button type="button" class="winc text-2xl leading-none px-2">+</button>
+      </div>
+
+      <div class="weight-panel hidden absolute top-full mt-2 left-1/2 -translate-x-1/2 z-30 bg-white border rounded shadow-lg w-48 text-left"></div>
+
+      <div class="weight-confirm hidden absolute top-full mt-2 left-1/2 -translate-x-1/2 z-20 bg-white border rounded shadow-lg p-3 w-64 text-left">
+        <div class="mb-2">
+          <span class="font-medium">Qty:</span>
+          <span class="chosen font-semibold"></span>
+        </div>
+        <div class="text-sm text-gray-700 mb-3">
+          Total est. price: <span class="est-price font-semibold"></span><br>
+          <span class="text-gray-500">Final cost by actual weight</span>
+        </div>
+        <button type="button" class="btn-add w-full rounded-full bg-yellow-400 hover:bg-yellow-500 active:bg-yellow-600 text-black font-semibold py-2">Add to Cart</button>
+      </div>
+    {% endif %}
+  </form>
+  {% endif %}
+</div>
