@@ -1,0 +1,2 @@
+/* Minimal helpers if you’re not using Tailwind here */
+.hidden { display: none; }

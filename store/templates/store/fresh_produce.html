@@ -1,0 +1,30 @@
+{% extends "store/base.html" %}
+{% load static %}
+
+{% block content %}
+<div id="fresh-produce" class="container mx-auto px-4">
+  <div class="flex justify-between items-center mb-6">
+    <h1 class="text-3xl font-bold">Fresh Produce</h1>
+  </div>
+
+  {# Expecting context like: categories = [{name, products: [...]}, ...] #}
+  {% for category in categories %}
+    <section class="mb-10">
+      <h2 class="text-2xl font-semibold mb-4">{{ category.name }}</h2>
+
+      <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        {% for product in category.products %}
+          {% include "store/partials/_product_card.html" with product=product %}
+        {% empty %}
+          <p class="text-gray-500">No products in this category yet.</p>
+        {% endfor %}
+      </div>
+    </section>
+  {% empty %}
+    <p class="text-gray-500">No categories available.</p>
+  {% endfor %}
+</div>
+
+<script src="{% static 'store/js/fresh_produce.js' %}" defer></script>
+<link rel="stylesheet" href="{% static 'store/css/fresh_produce.css' %}">
+{% endblock %}

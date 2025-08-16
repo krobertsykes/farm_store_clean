@@ -1,0 +1,28 @@
+{# Expects: product with fields: name, description, price, sale_price, unit_type, image, id #}
+<div class="rounded-xl border p-4 shadow-sm bg-white flex flex-col">
+  <div class="aspect-square mb-3 overflow-hidden rounded-md bg-gray-50">
+    {% if product.image %}
+      <img src="{{ product.image.url }}" alt="{{ product.name }}" class="w-full h-full object-cover">
+    {% endif %}
+  </div>
+
+  <h3 class="text-lg font-semibold">{{ product.name }}</h3>
+  {% if product.description %}<p class="text-sm text-gray-600 mb-2">{{ product.description }}</p>{% endif %}
+
+  <div class="mb-3">
+    {% if product.sale_price %}
+      <span class="text-gray-400 line-through mr-2">${{ product.price }}</span>
+      <span class="font-semibold">${{ product.sale_price }}</span>
+    {% else %}
+      <span class="font-semibold">${{ product.price }}</span>
+    {% endif %}
+    <span class="text-sm text-gray-500">
+      /{% if product.unit_type %}{{ product.unit_type }}{% else %}each{% endif %}
+    </span>
+  </div>
+
+  {% include "store/partials/_weight_selector.html" with product=product %}
+  {% include "store/partials/_quantity_controls.html" with product=product %}
+  {% include "store/partials/_cart_status.html" with product=product only %}
+  {% include "store/partials/_rating.html" with product=product only %}
+</div>

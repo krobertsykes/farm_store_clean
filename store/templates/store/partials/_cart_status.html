@@ -1,0 +1,4 @@
+{# Optional: show how much is already in cart; expects product.id and cart context #}
+{% if product.cart_qty %}
+  <div class="text-sm text-gray-600 mb-2">In cart: {{ product.cart_qty }}</div>
+{% endif %}

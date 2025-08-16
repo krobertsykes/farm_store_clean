@@ -1,0 +1,25 @@
+{# YCPS = Your Custom Portion/Weight Selector #}
+{# Expects: product.id; use data-product-id for JS targeting #}
+<div class="mb-3">
+  <button
+    class="ycps-trigger px-3 py-2 rounded-md border text-sm"
+    type="button"
+    aria-haspopup="listbox"
+    aria-expanded="false"
+    data-product-id="{{ product.id }}"
+  >
+    Choose weight
+  </button>
+
+  <div
+    class="ycps-listbox hidden mt-2 rounded-md border bg-white shadow-lg"
+    role="listbox"
+    tabindex="-1"
+    data-product-id="{{ product.id }}"
+  >
+    {# Example weights — replace with your dynamic options #}
+    <div class="ycps-option px-3 py-2 cursor-pointer" role="option" data-value="0.25">0.25 lb</div>
+    <div class="ycps-option px-3 py-2 cursor-pointer" role="option" data-value="0.5">0.5 lb</div>
+    <div class="ycps-option px-3 py-2 cursor-pointer" role="option" data-value="1">1 lb</div>
+  </div>
+</div>

@@ -13,6 +13,7 @@ from django.db.models import Avg, Count, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
 from products.models import Product
 from .forms import SignupForm, ProfileForm, CouponForm, CheckoutForm
@@ -179,7 +180,7 @@ def catalogue(request: HttpRequest) -> HttpResponse:
 
     return render(
         request,
-        "store/product_list.html",
+        "store/product_list.html",  # keep as-is unless you switch to fresh_produce.html
         {
             "categories": categories,
             "show_oos": show_oos,
@@ -349,23 +350,32 @@ def apply_coupon(request: HttpRequest) -> HttpResponse:
 
 # --- Ratings & Reviews ---
 
-@login_required
+@require_POST
 def rate_product(request: HttpRequest, product_id: int) -> JsonResponse:
-    if request.method != "POST":
-        raise Http404()
+    """
+    JSON-only endpoint for rating a product.
+    - 401 if not authenticated
+    - 403 if user hasn't purchased the product
+    - 400 for invalid stars
+    - 200 with {'ok': True, 'avg': <float>} on success
+    """
+    if not request.user.is_authenticated:
+        return JsonResponse({"ok": False, "error": "not_authenticated"}, status=401)
+
     try:
         stars = int(request.POST.get("stars", 0))
     except Exception:
-        stars = 0
-    if stars < 1 or stars > 5:
-        return JsonResponse({"ok": False, "error": "Invalid rating"}, status=400)
+        return JsonResponse({"ok": False, "error": "invalid"}, status=400)
+
+    if not (1 <= stars <= 5):
+        return JsonResponse({"ok": False, "error": "invalid"}, status=400)
 
     product = get_object_or_404(Product, pk=product_id)
 
     # Must have purchased in the past
     has_purchased = OrderItem.objects.filter(order__user=request.user, product=product).exists()
     if not has_purchased:
-        return JsonResponse({"ok": False, "error": "Purchase required"}, status=403)
+        return JsonResponse({"ok": False, "error": "not_purchased"}, status=403)
 
     Rating.objects.update_or_create(
         product=product,
