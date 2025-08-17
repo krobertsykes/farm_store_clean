@@ -17,7 +17,7 @@ window.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.fav-btn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const pid = btn.dataset.pid;
-      const url = btn.dataset.favUrl || `/favorites/toggle/${pid}/`;
+      const url = btn.dataset.favUrl || `/product/${pid}/favorite/`;
       fetch(url, { method:'POST', headers:{'X-CSRFToken':getCSRF(),'X-Requested-With':'XMLHttpRequest'} })
         .then(r=>r.json())
         .then(js=>{
@@ -69,7 +69,7 @@ window.addEventListener('DOMContentLoaded', () => {
   // --- cart / YCPS / weight list behaviors ---
   document.querySelectorAll('.add-form').forEach(form=>{
     const pid   = form.dataset.pid;
-    const unit  = (form.dataset.unit || '').trim().toLowerCase();  // ✅ normalize
+    const unit  = (form.dataset.unit || '').trim().toLowerCase();  // normalize
     const price = Number(form.dataset.price||'0');
     const url   = form.dataset.urlUpdate;
     const stock = Number(form.dataset.stock || '0');
@@ -154,7 +154,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     function applyServer(newQty, js){
       inCart = Number(newQty);
-      form.dataset.initialInCart = String(inCart); // ✅ keep dataset in sync
+      form.dataset.initialInCart = String(inCart); // keep dataset in sync
       const rem = (js && typeof js.remaining !== 'undefined') ? js.remaining : remaining();
       setRemainText(rem);
       const counter = document.getElementById('cart-count');
@@ -185,7 +185,6 @@ window.addEventListener('DOMContentLoaded', () => {
           if(chosen) chosen.textContent = fmtQty(pickToAdd);
           if(est)    est.textContent    = `$${(price*pickToAdd).toFixed(2)}`;
           panelSticky = false; // after picking, allow outside click to close confirm
-          // (YCPS remains hidden while confirm is shown)
         });
         panel.appendChild(row);
       }
@@ -195,11 +194,6 @@ window.addEventListener('DOMContentLoaded', () => {
 
       panel.classList.remove('hidden');
       confirm.classList.add('hidden');
-
-      // --- ADDED: hide YCPS while list is open + a11y state ---
-      ycps?.classList.add('hidden');
-      ycps?.setAttribute('aria-expanded', 'true');
-
       panelSticky = sticky;
     }
 
@@ -214,11 +208,8 @@ window.addEventListener('DOMContentLoaded', () => {
         if(target === inCart) return;
         postUpdateQty(url, target).then(js=>{ if(js?.ok) applyServer(target, js); });
       }else{
-        if (panel && !panel.classList.contains('hidden')) { 
-          panelSticky = true; 
-          return; 
-        }
-        buildAndOpenList(true); // sticky open (YCPS hidden & aria-expanded set inside)
+        if (panel && !panel.classList.contains('hidden')) { panelSticky = true; return; }
+        buildAndOpenList(true); // sticky open
       }
     });
 
@@ -243,12 +234,9 @@ window.addEventListener('DOMContentLoaded', () => {
       if (!panel.classList.contains('hidden')) {
         panel.classList.add('hidden');
         confirm?.classList.add('hidden');
-        // --- ADDED: re-show YCPS only if nothing in cart; a11y close state ---
-        if (inCart <= 0) ycps?.classList.remove('hidden');
-        ycps?.setAttribute('aria-expanded', 'false');
         return;
       }
-      buildAndOpenList(false); // opens list (YCPS hidden & aria-expanded set inside)
+      buildAndOpenList(false);
     });
 
     addBtn?.addEventListener('click', ()=>{
@@ -280,10 +268,6 @@ window.addEventListener('DOMContentLoaded', () => {
 
       panel?.classList.add('hidden');
       confirm?.classList.add('hidden');
-
-      // --- ADDED: re-show YCPS if nothing in cart; a11y close state ---
-      if (inCart <= 0) ycps?.classList.remove('hidden');
-      ycps?.setAttribute('aria-expanded', 'false');
     });
 
     // Esc always collapses (and clears sticky)
@@ -291,9 +275,6 @@ window.addEventListener('DOMContentLoaded', () => {
       if (e.key === 'Escape') {
         if(panel && !panel.classList.contains('hidden')) panel.classList.add('hidden');
         if(confirm && !confirm.classList.contains('hidden')) confirm.classList.add('hidden');
-        // --- ADDED: re-show YCPS if nothing in cart; a11y close state ---
-        if (inCart <= 0) ycps?.classList.remove('hidden');
-        ycps?.setAttribute('aria-expanded', 'false');
         panelSticky = false;
       }
     });
@@ -346,16 +327,13 @@ window.addEventListener('DOMContentLoaded', () => {
       panel.classList.remove('hidden');
       confirm.classList.add('hidden');
       form.dataset.weightPanelSticky = '1';
-      // --- ADDED: hide YCPS + a11y open state since we opened directly here ---
-      btn.classList.add('hidden');
-      btn.setAttribute('aria-expanded','true');
     }
   });
 
   // Optional: listen for cart updates to refresh remain on the affected card
   document.addEventListener('cart:updated', (e)=>{
     const {form, js} = e.detail || {};
-    const card = form?.closest('[id^="prod-"]");
+    const card = form?.closest('[id^="prod-"]');
     const remainEl = card?.querySelector('.remain');
     if (remainEl && typeof js?.remaining !== 'undefined') {
       remainEl.textContent = js.remaining;
