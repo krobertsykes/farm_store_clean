@@ -340,3 +340,183 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   });
 });
+
+// --- YCPS v2: robust hide-on-click using pointerdown + capture; no template changes ---
+(function(){
+  if (window.__ycps_patch_v2) return;  // avoid double-binding
+  window.__ycps_patch_v2 = true;
+
+  function hideListFor(list){
+    if(!list) return;
+    list.classList.add('hidden');
+    const btn = list.parentElement ? list.parentElement.querySelector('.ycps-trigger') : null;
+    if(btn) {
+      btn.classList.remove('hidden');
+      btn.setAttribute('aria-expanded','false');
+    }
+  }
+
+  // Open on pointerdown with capture so we run even if other handlers stop propagation
+  const openHandler = function(evt){
+    const trigger = evt.composedPath?.().find(el => el?.classList?.contains?.('ycps-trigger'));
+    if(!trigger) return;
+
+    // Prevent other click logic and focus artifacts
+    evt.preventDefault();
+
+    // Hide the EXACT button that was clicked
+    trigger.classList.add('hidden');
+    trigger.setAttribute('aria-expanded','true');
+
+    // Show the sibling listbox within the same wrapper
+    const wrapper = trigger.parentElement;
+    const list = wrapper ? wrapper.querySelector('.ycps-listbox') : null;
+    if(list){
+      list.classList.remove('hidden');
+      list.setAttribute('tabindex','-1');
+      try { list.focus({ preventScroll: true }); } catch(e){ /* no-op */ }
+    }
+  };
+
+  // Close when picking an option (bubble ok)
+  const optionClick = function(evt){
+    const opt = evt.target.closest && evt.target.closest('.ycps-option');
+    if(!opt) return;
+    const list = opt.closest('.ycps-listbox');
+    if(!list) return;
+
+    // Optional: mirror choice onto the button label; comment out next 3 lines to keep static text
+    const btn = list.parentElement ? list.parentElement.querySelector('.ycps-trigger') : null;
+    if(btn && opt.textContent) btn.textContent = opt.textContent.trim();
+
+    hideListFor(list);
+  };
+
+  // Click-away: if pointerdown happens outside any open list, close them
+  const clickAway = function(evt){
+    // Ignore if we're inside a trigger or a listbox
+    if (evt.target.closest && (evt.target.closest('.ycps-trigger') || evt.target.closest('.ycps-listbox'))) return;
+    document.querySelectorAll('.ycps-listbox:not(.hidden)').forEach(hideListFor);
+  };
+
+  // Use capture to beat stopPropagation in other scripts
+  document.addEventListener('pointerdown', openHandler, true);
+  document.addEventListener('click', optionClick, true);
+  document.addEventListener('pointerdown', clickAway, true);
+})();
+
+// --- YCPS v2.1: ensure inline display toggles too (belt & suspenders) ---
+(function(){
+  if (window.__ycps_patch_v2_1) return;
+  window.__ycps_patch_v2_1 = true;
+
+  function showList(list){
+    if(!list) return;
+    list.classList.remove('hidden');
+    list.style.display = '';
+    list.setAttribute('tabindex','-1');
+    try { list.focus({ preventScroll: true }); } catch(e){}
+  }
+  function hideList(list){
+    if(!list) return;
+    list.classList.add('hidden');
+    list.style.display = 'none';
+  }
+  function showBtn(btn){
+    if(!btn) return;
+    btn.classList.remove('hidden');
+    btn.style.display = '';
+    btn.setAttribute('aria-expanded','false');
+  }
+  function hideBtn(btn){
+    if(!btn) return;
+    btn.classList.add('hidden');
+    btn.style.display = 'none';
+    btn.setAttribute('aria-expanded','true');
+  }
+
+  document.addEventListener('pointerdown', function(evt){
+    const trigger = evt.composedPath?.().find(el => el?.classList?.contains?.('ycps-trigger'));
+    if(!trigger) return;
+    evt.preventDefault();
+    hideBtn(trigger);
+    const list = trigger.parentElement ? trigger.parentElement.querySelector('.ycps-listbox') : null;
+    showList(list);
+  }, true);
+
+  document.addEventListener('click', function(evt){
+    const opt = evt.target.closest && evt.target.closest('.ycps-option');
+    if(!opt) return;
+    const list = opt.closest('.ycps-listbox');
+    const btn  = list && list.parentElement ? list.parentElement.querySelector('.ycps-trigger') : null;
+    // optional label reflect
+    if(btn && opt.textContent) btn.textContent = opt.textContent.trim();
+    hideList(list);
+    showBtn(btn);
+  }, true);
+
+  document.addEventListener('pointerdown', function(evt){
+    if (evt.target.closest && (evt.target.closest('.ycps-trigger') || evt.target.closest('.ycps-listbox'))) return;
+    document.querySelectorAll('.ycps-listbox:not(.hidden)').forEach(l => {
+      const btn = l.parentElement ? l.parentElement.querySelector('.ycps-trigger') : null;
+      hideList(l);
+      showBtn(btn);
+    });
+  }, true);
+})();
+
+// --- YCPS: production per-button attach (no logs, safe observer) ---
+(function(){
+  if (window.__ycps_prod_perbtn) return;
+  window.__ycps_prod_perbtn = true;
+
+  // Ensure .hidden hides
+  (function(){
+    var s = document.createElement('style');
+    s.textContent = '.hidden{display:none !important}';
+    document.head.appendChild(s);
+  })();
+
+  var BTN_SEL = 'button.ycps';
+
+  function reallyHide(btn){
+    if (!btn) return;
+    if (!btn.classList.contains('hidden')) btn.classList.add('hidden');
+    if (getComputedStyle(btn).display !== 'none') btn.style.setProperty('display','none','important');
+    if (!btn.hidden) btn.hidden = true;
+  }
+
+  function attach(btn){
+    if (!btn || btn.__ycpsAttached) return;
+    btn.__ycpsAttached = true;
+
+    // Bubble: after your app’s handler
+    btn.addEventListener('click', function(){
+      requestAnimationFrame(function(){
+        requestAnimationFrame(function(){
+          if (!document.contains(btn)) return;
+          reallyHide(btn);
+          setTimeout(function(){ if (document.contains(btn)) reallyHide(btn); }, 120);
+          setTimeout(function(){ if (document.contains(btn)) reallyHide(btn); }, 320);
+        });
+      });
+    }, false);
+  }
+
+  // Attach to current buttons
+  document.querySelectorAll(BTN_SEL).forEach(attach);
+
+  // Attach to future buttons (safe: childList only, no attribute watching)
+  new MutationObserver(function(muts){
+    for (var i=0;i<muts.length;i++){
+      var m = muts[i];
+      for (var j=0;j<m.addedNodes.length;j++){
+        var n = m.addedNodes[j];
+        if (n.nodeType !== 1) continue;
+        if (n.matches && n.matches(BTN_SEL)) attach(n);
+        var q = n.querySelectorAll ? n.querySelectorAll(BTN_SEL) : [];
+        for (var k=0;k<q.length;k++) attach(q[k]);
+      }
+    }
+  }).observe(document.body, {childList:true, subtree:true});
+})();
