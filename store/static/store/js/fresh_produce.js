@@ -465,58 +465,175 @@ window.addEventListener('DOMContentLoaded', () => {
   }, true);
 })();
 
-// --- YCPS: production per-button attach (no logs, safe observer) ---
+// === YCPS DIAGNOSTIC BLACK BOX (overlay + logs) ===
+// Hides only the clicked "+" AFTER your app opens the list.
+// Adds outlines + logs so you can see what's bound/hidden.
+// Safe: does not block your dropdown logic.
 (function(){
-  if (window.__ycps_prod_perbtn) return;
-  window.__ycps_prod_perbtn = true;
+  if (window.__ycps_bb_overlay) return; // avoid double-binding
+  window.__ycps_bb_overlay = true;
 
-  // Ensure .hidden hides
-  (function(){
-    var s = document.createElement('style');
-    s.textContent = '.hidden{display:none !important}';
-    document.head.appendChild(s);
-  })();
+  // Selectors (expand if your class changes)
+  const BTN_SEL = 'button.ycps';
 
-  var BTN_SEL = 'button.ycps';
+  // Ensure our hide CSS exists once
+  if (!document.getElementById('ycps-hide-style')) {
+    const st = document.createElement('style');
+    st.id = 'ycps-hide-style';
+    st.textContent = `.ycps-hide{display:none!important}`;
+    document.head.appendChild(st);
+  }
 
-  function reallyHide(btn){
+  // Hide helper with overlay log
+  function hide(btn){
     if (!btn) return;
-    if (!btn.classList.contains('hidden')) btn.classList.add('hidden');
-    if (getComputedStyle(btn).display !== 'none') btn.style.setProperty('display','none','important');
-    if (!btn.hidden) btn.hidden = true;
+    console.log('[YCPS] HIDE →', btn);    // hover log to see page overlay
+    btn.classList.add('ycps-hide');
+    btn.style.setProperty('display','none','important'); // beats Tailwind flex/etc
+    btn.setAttribute('aria-expanded','true');
   }
 
-  function attach(btn){
-    if (!btn || btn.__ycpsAttached) return;
-    btn.__ycpsAttached = true;
+  // Bind per-button listeners (with outline + attach log)
+  function bind(btn){
+    if (!btn || btn.__ycpsBoundOverlay) return;
+    btn.__ycpsBoundOverlay = true;
 
-    // Bubble: after your app’s handler
-    btn.addEventListener('click', function(){
-      requestAnimationFrame(function(){
-        requestAnimationFrame(function(){
-          if (!document.contains(btn)) return;
-          reallyHide(btn);
-          setTimeout(function(){ if (document.contains(btn)) reallyHide(btn); }, 120);
-          setTimeout(function(){ if (document.contains(btn)) reallyHide(btn); }, 320);
-        });
-      });
+    // Visual: outline so you know which buttons are targeted
+    btn.style.outline = '2px solid #00aaff';
+    console.log('[YCPS] ATTACH →', btn);  // hover log to highlight on page
+
+    // Let the page open the dropdown, then hide the "+"
+    btn.addEventListener('click', () => {
+      requestAnimationFrame(() => hide(btn));
     }, false);
+
+    // Backup: if click is swallowed / async render, hide shortly after pointerdown
+    btn.addEventListener('pointerdown', () => {
+      setTimeout(() => hide(btn), 120);
+    }, true);
   }
 
-  // Attach to current buttons
-  document.querySelectorAll(BTN_SEL).forEach(attach);
+  // Bind current buttons
+  const initial = Array.from(document.querySelectorAll(BTN_SEL));
+  console.log(`[YCPS] INIT: found ${initial.length} ycps button(s)`, initial);
+  initial.forEach(bind);
 
-  // Attach to future buttons (safe: childList only, no attribute watching)
-  new MutationObserver(function(muts){
-    for (var i=0;i<muts.length;i++){
-      var m = muts[i];
-      for (var j=0;j<m.addedNodes.length;j++){
-        var n = m.addedNodes[j];
-        if (n.nodeType !== 1) continue;
-        if (n.matches && n.matches(BTN_SEL)) attach(n);
-        var q = n.querySelectorAll ? n.querySelectorAll(BTN_SEL) : [];
-        for (var k=0;k<q.length;k++) attach(q[k]);
-      }
-    }
-  }).observe(document.body, {childList:true, subtree:true});
+  // Bind future buttons (re-renders, pagination, etc.)
+  const mo = new MutationObserver(muts => {
+    muts.forEach(m => {
+      m.addedNodes && m.addedNodes.forEach(n => {
+        if (n.nodeType !== 1) return;
+        if (n.matches?.(BTN_SEL)) bind(n);
+        n.querySelectorAll?.(BTN_SEL).forEach(bind);
+      });
+    });
+  });
+  mo.observe(document.body, { childList:true, subtree:true });
+
+  // Delegation fallback (fires even if a new button slipped past observer)
+  document.addEventListener('click', (e)=>{
+    const b = e.target.closest && e.target.closest(BTN_SEL);
+    if (!b) return;
+    // ensure it's bound at first use
+    bind(b);
+  }, true);
+
+  console.log('[YCPS] Diagnostic black box (overlay+logs) installed');
+})();
+
+console.log('%c YCPS FILE LIVE v11','background:#222;color:#0f0;padding:2px 4px');
+window.__ycps_file_ver = 'v11';
+
+// --- YCPS: hide the clicked "+" after dropdown opens (clean, no logs) ---
+(function(){
+  if (window.__ycps_bb_clean) return;
+  window.__ycps_bb_clean = true;
+
+  if (!document.getElementById('ycps-hide-style')) {
+    const st = document.createElement('style');
+    st.id = 'ycps-hide-style';
+    st.textContent = '.ycps-hide{display:none!important}';
+    document.head.appendChild(st);
+  }
+
+  const BTN = 'button.ycps';
+  const afterApp = fn => requestAnimationFrame(() => setTimeout(fn, 60));
+  const hide = (btn) => {
+    if (!btn) return;
+    btn.classList.add('ycps-hide');
+    btn.style.setProperty('display','none','important');
+    btn.setAttribute('aria-expanded','true');
+  };
+
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest(BTN);
+    if (!b) return;
+    afterApp(() => {
+      hide(b);
+      const mo = new MutationObserver(() => hide(b));
+      mo.observe(document.body, { childList:true, subtree:true, attributes:true, attributeFilter:['class','style'] });
+      setTimeout(() => mo.disconnect(), 1500);
+    });
+  }, false);
+
+  document.addEventListener('pointerdown', (e) => {
+    const b = e.target.closest && e.target.closest(BTN);
+    if (!b) return;
+    setTimeout(() => hide(b), 120);
+  }, true);
+})();
+
+// ===== YCPS FILE LIVE v9 =====
+console.log('%c YCPS FILE LIVE v9','background:#222;color:#0f0;padding:2px 4px');
+window.__ycps_file_ver = 'v9';
+
+// --- YCPS: hide the clicked "+" after dropdown opens (clean, no logs) ---
+(function(){
+  if (window.__ycps_file_v9) return;   // guard so we don't double-bind
+  window.__ycps_file_v9 = true;
+
+  // Ensure a CSS rule that always wins
+  if (!document.getElementById('ycps-hide-style')) {
+    const st = document.createElement('style');
+    st.id = 'ycps-hide-style';
+    st.textContent = '.ycps-hide{display:none!important}';
+    document.head.appendChild(st);
+  }
+
+  const BTN = 'button.ycps';
+  const afterApp = fn => requestAnimationFrame(() => setTimeout(fn, 60));
+
+  const hide = (btn) => {
+    if (!btn) return;
+    btn.classList.add('ycps-hide');
+    btn.style.setProperty('display','none','important'); // beats Tailwind flex/etc
+    btn.setAttribute('aria-expanded','true');
+  };
+
+  // Let the page open the list first, then hide the "+"
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest(BTN);
+    if (!b) return;
+
+    afterApp(() => {
+      hide(b);
+
+      // If the card re-renders right after, keep it hidden briefly
+      const mo = new MutationObserver(() => hide(b));
+      mo.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class','style']
+      });
+      setTimeout(() => mo.disconnect(), 1500);
+    });
+  }, false);
+
+  // Backup: if click gets swallowed, hide shortly after pointerdown (still non-blocking)
+  document.addEventListener('pointerdown', (e) => {
+    const b = e.target.closest && e.target.closest(BTN);
+    if (!b) return;
+    setTimeout(() => hide(b), 120);
+  }, true);
 })();

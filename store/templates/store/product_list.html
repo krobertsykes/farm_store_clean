@@ -47,5 +47,7 @@
 </style>
 
 {# IMPORTANT: Load behavior JS INSIDE this content block so it actually renders #}
-<script src="{% static 'store/js/fresh_produce.js' %}" defer></script>
+{% load static %}
+<script src="{% static 'store/js/fresh_produce.js' %}?v=ycps-v11" defer></script>
+<script src="{% static 'store/js/ycps_hide.js' %}?v=1" defer></script>
 {% endblock %}
