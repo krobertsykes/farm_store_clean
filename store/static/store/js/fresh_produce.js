@@ -1,4 +1,4 @@
-// fresh_produce.js
+// fresh_produce.js — CLEAN (no YCPS overlay scripts)
 
 // --- helpers ---
 function getCSRF(){
@@ -9,9 +9,21 @@ function postUpdateQty(url,qty){
   return fetch(url,{ method:'POST', headers:{'X-CSRFToken':getCSRF(),'X-Requested-With':'XMLHttpRequest'}, body:data }).then(r=>r.json());
 }
 
-window.addEventListener('DOMContentLoaded', () => {
-  // Sanity check: open your browser console and you should see this once.
+// Small helpers to manage YCPS visibility robustly
+function showYCPS(btn){
+  if(!btn) return;
+  btn.classList.remove('hidden','ycps-hide');
+  btn.style.removeProperty('display');              // undo any inline display:none!important
+  btn.setAttribute('aria-expanded','false');
+}
+function hideYCPS(btn){
+  if(!btn) return;
+  btn.classList.add('hidden');
+  btn.style.removeProperty('display');              // we use classes; keep inline clean
+  btn.setAttribute('aria-expanded','true');
+}
 
+window.addEventListener('DOMContentLoaded', () => {
   // --- favorites ---
   document.querySelectorAll('.fav-btn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -35,89 +47,86 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // --- ratings ---
-  // Inject minimal styles for disabled stars & tooltip
-  (function ensureRatingStyles(){
-    if (document.getElementById('rating-gate-style')) return;
-    const st = document.createElement('style');
-    st.id = 'rating-gate-style';
-    st.textContent = `
-      .rate-wrap{ position: relative; }
-      .rate-wrap .rate-disabled svg{ stroke:#9CA3AF !important; fill:none !important; opacity:0.8; }
-      .rate-tip{ position:absolute; left:50%; transform:translate(-50%,-6px); top:-1.25rem;
-                 background:rgba(17,24,39,0.92); color:#fff; padding:4px 8px; border-radius:6px;
-                 font-size:12px; line-height:1; white-space:nowrap; pointer-events:none;
-                 opacity:0; transition:opacity .15s ease, transform .15s ease; }
-      .rate-tip.show{ opacity:1; transform:translate(-50%,-10px); }
-    `;
-    document.head.appendChild(st);
+  // --- ratings (single gate, deduped) ---
+  (()=>{
+    if (window.__rating_gate_installed) return;
+    window.__rating_gate_installed = true;
+
+    const ensureStyles = () => {
+      if (document.getElementById("rating-gate-style")) return;
+      const st = document.createElement("style");
+      st.id = "rating-gate-style";
+      st.textContent = `
+        .rate-wrap{position:relative}
+        .rate-disabled svg, .rate-disabled svg *{ fill:none!important; stroke:#9CA3AF!important; opacity:.8; }
+        .rate-tip{ position:absolute; left:50%; top:-1.25rem; transform:translate(-50%,-6px);
+          background:rgba(17,24,39,.92); color:#fff; padding:4px 8px; border-radius:6px;
+          font-size:12px; white-space:nowrap; pointer-events:none; opacity:0;
+          transition:opacity .15s ease, transform .15s ease; }
+        .rate-tip.show{ opacity:1; transform:translate(-50%,-10px); }
+      `;
+      document.head.appendChild(st);
+    };
+
+    const wrapOf  = b => b.closest(".rate-wrap") || b.parentElement;
+    const canRate = w => (w?.dataset?.canRate === "1");
+    const userStars = w => parseInt(w?.dataset?.userStars || "0", 10);
+    const starVal = b => parseInt(b.dataset.stars || "0", 10);
+    const tipFor = w => {
+      let t = w.querySelector(".rate-tip");
+      if (!t){ t=document.createElement("div"); t.className="rate-tip";
+               t.textContent="Rating a product requires purchase."; w.appendChild(t); }
+      return t;
+    };
+
+    const paintWrap = (wrap) => {
+      const allow = canRate(wrap), you = userStars(wrap);
+      wrap.querySelectorAll(".rate-btn").forEach(btn => {
+        const k = starVal(btn);
+        if (!allow && k > you) {
+          if (!btn.classList.contains("rate-disabled")) {
+            btn.classList.add("rate-disabled");
+            if (!btn.__rgBound) {
+              btn.__rgBound = true;
+              const show = ()=> tipFor(wrap).classList.add("show");
+              const hide = ()=> tipFor(wrap).classList.remove("show");
+              btn.addEventListener("mouseenter", show);
+              btn.addEventListener("mouseleave", hide);
+              btn.addEventListener("click", () => { show(); setTimeout(hide, 900); });
+            }
+          }
+        } else {
+          btn.classList.remove("rate-disabled");
+        }
+      });
+    };
+
+    const paintAll = () => document.querySelectorAll(".rate-wrap").forEach(paintWrap);
+    ensureStyles(); paintAll();
+
+    new MutationObserver(muts=>{
+      muts.forEach(m=>m.addedNodes?.forEach(n=>{
+        if (n.nodeType!==1) return;
+        if (n.matches?.(".rate-wrap")) paintWrap(n);
+        n.querySelectorAll?.(".rate-wrap").forEach(paintWrap);
+      }));
+    }).observe(document.body, { childList:true, subtree:true });
+
+    // Block disallowed posts early
+    document.addEventListener("click",(evt)=>{
+      const btn = evt.target.closest?.(".rate-btn");
+      if(!btn) return;
+      const w = wrapOf(btn);
+      if(!w) return;
+      if(!canRate(w) && starVal(btn) > userStars(w)){
+        evt.preventDefault();
+        evt.stopImmediatePropagation();
+        const t = tipFor(w); t.classList.add("show"); setTimeout(()=>t.classList.remove("show"), 900);
+      }
+    }, true);
   })();
 
-  function getTip(wrap){
-    let tip = wrap.querySelector('.rate-tip');
-    if(!tip){
-      tip = document.createElement('div');
-      tip.className = 'rate-tip';
-      tip.textContent = 'Rating a product requires purchase.';
-      wrap.appendChild(tip);
-    }
-    return tip;
-  }
-
-  document.querySelectorAll('.rate-btn').forEach(btn=>{
-    const wrap = btn.closest('.rate-wrap') || btn.parentElement;
-    const canRate = wrap?.dataset?.canRate === '1';
-    const userStars = parseInt(wrap?.dataset?.userStars||'0',10);
-    const k = parseInt(btn.dataset.stars||'0',10);
-    const svg = btn.querySelector('svg');
-
-    // If user cannot rate and this star is above current userStars, grey it and show tip on hover/click
-    if(!canRate && k > userStars){
-      btn.classList.add('rate-disabled');
-      if(svg){
-        svg.setAttribute('fill','none');
-        svg.setAttribute('stroke','#9CA3AF');
-      }
-      const show = ()=>{ const tip=getTip(wrap); tip.classList.add('show'); };
-      const hide = ()=>{ const tip=getTip(wrap); tip.classList.remove('show'); };
-      btn.addEventListener('mouseenter', show);
-      btn.addEventListener('mouseleave', hide);
-      btn.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); const tip=getTip(wrap); tip.classList.add('show'); setTimeout(()=>tip.classList.remove('show'), 900); });
-      return; // do not bind real rating handler
-    }
-
-    // Real rating handler
-    btn.addEventListener('click', ()=>{
-      const pid = btn.dataset.pid, stars = btn.dataset.stars;
-      fetch(`/product/${pid}/rate/`, {
-        method: 'POST',
-        headers: {'X-CSRFToken': getCSRF(), 'X-Requested-With':'XMLHttpRequest'},
-        body: new URLSearchParams({stars})
-      })
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(js=>{
-        const wrap = btn.parentElement;
-        wrap.querySelectorAll('.rate-btn').forEach(b=>{
-          const k = parseInt(b.dataset.stars,10);
-          const svg = b.querySelector('svg');
-          if(k <= parseInt(stars,10)){
-            svg.setAttribute('fill','#F59E0B'); svg.setAttribute('stroke','none');
-            b.classList.remove('rate-disabled');
-          }else{
-            // For remaining unfilled stars, keep stroke gold for raters
-            svg.setAttribute('fill','none'); svg.setAttribute('stroke','#F59E0B');
-          }
-        });
-        const avgEl = document.querySelector(`.avg-stars[data-pid="${pid}"]`);
-        if(js && js.ok && typeof js.avg !== 'undefined' && avgEl){
-          const v = Math.round(Number(js.avg)*10)/10;
-          avgEl.textContent = v.toFixed(1);
-        }
-      }).catch(()=>{});
-    });
-  });
-
-// --- cart / YCPS / weight list behaviors ---
+  // --- cart / YCPS / weight list behaviors (clean) ---
   document.querySelectorAll('.add-form').forEach(form=>{
     const pid   = form.dataset.pid;
     const unit  = (form.dataset.unit || '').trim().toLowerCase();  // normalize
@@ -175,23 +184,23 @@ window.addEventListener('DOMContentLoaded', () => {
       if(unit==='ea'){
         if(inCart>0){
           stepEl?.classList.remove('hidden');
-          ycps?.classList.add('hidden');
+          hideYCPS(ycps);
           if(countEl) countEl.textContent = String(Math.floor(inCart));
         }else{
           stepEl?.classList.add('hidden');
-          ycps?.classList.remove('hidden');
+          showYCPS(ycps);
         }
       }else{
         if(inCart>0){
-          ycps?.classList.add('hidden');
+          hideYCPS(ycps);
           panel?.classList.add('hidden');
           confirm?.classList.add('hidden');
           wStep?.classList.remove('hidden');
-          if(wqty) wqty.textContent = (unit==='oz') ? String(Math.round(inCart)) : String((Math.round(inCart*100)/100).toFixed(2).replace(/\.00$/,''));
+          if(wqty)  wqty.textContent  = (unit==='oz') ? String(Math.round(inCart)) : String((Math.round(inCart*100)/100).toFixed(2).replace(/\.00$/,''));
           if(wunit) wunit.textContent = unit;
         }else{
           wStep?.classList.add('hidden');
-          ycps?.classList.remove('hidden');
+          showYCPS(ycps);
           panel?.classList.add('hidden');
           confirm?.classList.add('hidden');
         }
@@ -250,21 +259,27 @@ window.addEventListener('DOMContentLoaded', () => {
 
     syncUI();
 
-    // YCPS: 'ea' increments; by-weight opens list and keeps it open
+    // YCPS click
     ycps?.addEventListener('click', e=>{
       e.preventDefault();
-      e.stopPropagation(); // be extra safe vs outside-click handlers
+      e.stopPropagation();
+
+      hideYCPS(ycps); // hide immediately
+
       if(unit === 'ea'){
         const target = Math.min(stock, inCart + 1);
-        if(target === inCart) return;
-        postUpdateQty(url, target).then(js=>{ if(js?.ok) applyServer(target, js); });
+        if(target === inCart){ showYCPS(ycps); return; }
+        stepEl?.classList.remove('hidden');
+        if(countEl) countEl.textContent = String(Math.floor(inCart+1));
+        postUpdateQty(url, target).then(js=>{ if(js?.ok) applyServer(target, js); else showYCPS(ycps); });
       }else{
         if (panel && !panel.classList.contains('hidden')) { panelSticky = true; return; }
-        buildAndOpenList(true); // sticky open
+        buildAndOpenList(true);
+        wStep?.classList.remove('hidden');
       }
     });
 
-    // Each stepper
+    // Each stepper (ea)
     inc?.addEventListener('click', e=>{
       e.preventDefault();
       const target = Math.min(stock, inCart + 1);
@@ -279,7 +294,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     function weightStep(){ return stepInfo().step; }
 
-    // Down-arrow toggles the list (non-sticky)
+    // Weight caret toggles the list (non-sticky)
     wcaret?.addEventListener('click', ()=>{
       if (!panel) return;
       if (!panel.classList.contains('hidden')) {
@@ -312,11 +327,7 @@ window.addEventListener('DOMContentLoaded', () => {
       const confirmOpen = confirm && !confirm.classList.contains('hidden');
       if(!listOpen && !confirmOpen) return;
       if(form.contains(ev.target)) return;
-
-      if(listOpen && panelSticky){
-        return; // keep open until a choice or Esc
-      }
-
+      if(listOpen && panelSticky) return; // keep open until a choice or Esc
       panel?.classList.add('hidden');
       confirm?.classList.add('hidden');
     });
@@ -333,14 +344,14 @@ window.addEventListener('DOMContentLoaded', () => {
     form.addEventListener('submit', e=>e.preventDefault());
   });
 
-  // ---------- Delegated YCPS handler (catches any stragglers / future cards) ----------
+  // Delegated YCPS fallback (for any future cards injected later)
   document.addEventListener('click', (evt)=>{
     const btn = evt.target.closest('.ycps');
     if (!btn) return;
 
-    // If the per-form handler already ran, do nothing
+    // If the per-form handler bound, let it win
     if (btn._handledOnce) return;
-    btn._handledOnce = true;  // prevent double-processing in this tick
+    btn._handledOnce = true;
     setTimeout(()=>{ btn._handledOnce = false; }, 0);
 
     evt.preventDefault();
@@ -348,7 +359,6 @@ window.addEventListener('DOMContentLoaded', () => {
     const form = btn.closest('.add-form');
     if (!form) return;
 
-    // Re-run the same logic with normalized unit
     const unit  = (form.dataset.unit || '').trim().toLowerCase();
     const url   = form.dataset.urlUpdate;
     const stock = Number(form.dataset.stock || '0');
@@ -367,13 +377,12 @@ window.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // By-weight fallback: simply toggle the caret (if present) or open panel if not
+    // By-weight fallback: toggle caret or open panel
     const panel  = form.querySelector('.weight-panel');
     const confirm= form.querySelector('.weight-confirm');
     const wcaret = form.querySelector('.wcaret');
 
     if (wcaret) { wcaret.click(); return; }
-
     if (panel && confirm) {
       panel.classList.remove('hidden');
       confirm.classList.add('hidden');
@@ -381,7 +390,7 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Optional: listen for cart updates to refresh remain on the affected card
+  // Update remain when we hear a cart update
   document.addEventListener('cart:updated', (e)=>{
     const {form, js} = e.detail || {};
     const card = form?.closest('[id^="prod-"]');
@@ -391,486 +400,3 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   });
 });
-
-// --- YCPS v2: robust hide-on-click using pointerdown + capture; no template changes ---
-(function(){
-  if (window.__ycps_patch_v2) return;  // avoid double-binding
-  window.__ycps_patch_v2 = true;
-
-  function hideListFor(list){
-    if(!list) return;
-    list.classList.add('hidden');
-    const btn = list.parentElement ? list.parentElement.querySelector('.ycps-trigger') : null;
-    if(btn) {
-      btn.classList.remove('hidden');
-      btn.setAttribute('aria-expanded','false');
-    }
-  }
-
-  // Open on pointerdown with capture so we run even if other handlers stop propagation
-  const openHandler = function(evt){
-    const trigger = evt.composedPath?.().find(el => el?.classList?.contains?.('ycps-trigger'));
-    if(!trigger) return;
-
-    // Prevent other click logic and focus artifacts
-    evt.preventDefault();
-
-    // Hide the EXACT button that was clicked
-    trigger.classList.add('hidden');
-    trigger.setAttribute('aria-expanded','true');
-
-    // Show the sibling listbox within the same wrapper
-    const wrapper = trigger.parentElement;
-    const list = wrapper ? wrapper.querySelector('.ycps-listbox') : null;
-    if(list){
-      list.classList.remove('hidden');
-      list.setAttribute('tabindex','-1');
-      try { list.focus({ preventScroll: true }); } catch(e){ /* no-op */ }
-    }
-  };
-
-  // Close when picking an option (bubble ok)
-  const optionClick = function(evt){
-    const opt = evt.target.closest && evt.target.closest('.ycps-option');
-    if(!opt) return;
-    const list = opt.closest('.ycps-listbox');
-    if(!list) return;
-
-    // Optional: mirror choice onto the button label; comment out next 3 lines to keep static text
-    const btn = list.parentElement ? list.parentElement.querySelector('.ycps-trigger') : null;
-    if(btn && opt.textContent) btn.textContent = opt.textContent.trim();
-
-    hideListFor(list);
-  };
-
-  // Click-away: if pointerdown happens outside any open list, close them
-  const clickAway = function(evt){
-    // Ignore if we're inside a trigger or a listbox
-    if (evt.target.closest && (evt.target.closest('.ycps-trigger') || evt.target.closest('.ycps-listbox'))) return;
-    document.querySelectorAll('.ycps-listbox:not(.hidden)').forEach(hideListFor);
-  };
-
-  // Use capture to beat stopPropagation in other scripts
-  document.addEventListener('pointerdown', openHandler, true);
-  document.addEventListener('click', optionClick, true);
-  document.addEventListener('pointerdown', clickAway, true);
-})();
-
-// --- YCPS v2.1: ensure inline display toggles too (belt & suspenders) ---
-(function(){
-  if (window.__ycps_patch_v2_1) return;
-  window.__ycps_patch_v2_1 = true;
-
-  function showList(list){
-    if(!list) return;
-    list.classList.remove('hidden');
-    list.style.display = '';
-    list.setAttribute('tabindex','-1');
-    try { list.focus({ preventScroll: true }); } catch(e){}
-  }
-  function hideList(list){
-    if(!list) return;
-    list.classList.add('hidden');
-    list.style.display = 'none';
-  }
-  function showBtn(btn){
-    if(!btn) return;
-    btn.classList.remove('hidden');
-    btn.style.display = '';
-    btn.setAttribute('aria-expanded','false');
-  }
-  function hideBtn(btn){
-    if(!btn) return;
-    btn.classList.add('hidden');
-    btn.style.display = 'none';
-    btn.setAttribute('aria-expanded','true');
-  }
-
-  document.addEventListener('pointerdown', function(evt){
-    const trigger = evt.composedPath?.().find(el => el?.classList?.contains?.('ycps-trigger'));
-    if(!trigger) return;
-    evt.preventDefault();
-    hideBtn(trigger);
-    const list = trigger.parentElement ? trigger.parentElement.querySelector('.ycps-listbox') : null;
-    showList(list);
-  }, true);
-
-  document.addEventListener('click', function(evt){
-    const opt = evt.target.closest && evt.target.closest('.ycps-option');
-    if(!opt) return;
-    const list = opt.closest('.ycps-listbox');
-    const btn  = list && list.parentElement ? list.parentElement.querySelector('.ycps-trigger') : null;
-    // optional label reflect
-    if(btn && opt.textContent) btn.textContent = opt.textContent.trim();
-    hideList(list);
-    showBtn(btn);
-  }, true);
-
-  document.addEventListener('pointerdown', function(evt){
-    if (evt.target.closest && (evt.target.closest('.ycps-trigger') || evt.target.closest('.ycps-listbox'))) return;
-    document.querySelectorAll('.ycps-listbox:not(.hidden)').forEach(l => {
-      const btn = l.parentElement ? l.parentElement.querySelector('.ycps-trigger') : null;
-      hideList(l);
-      showBtn(btn);
-    });
-  }, true);
-})();
-
-// === YCPS DIAGNOSTIC BLACK BOX (overlay + logs) ===
-// Hides only the clicked "+" AFTER your app opens the list.
-// Adds outlines + logs so you can see what's bound/hidden.
-// Safe: does not block your dropdown logic.
-(function(){
-  if (window.__ycps_bb_overlay) return; // avoid double-binding
-  window.__ycps_bb_overlay = true;
-
-  // Selectors (expand if your class changes)
-  const BTN_SEL = 'button.ycps';
-
-  // Ensure our hide CSS exists once
-  if (!document.getElementById('ycps-hide-style')) {
-    const st = document.createElement('style');
-    st.id = 'ycps-hide-style';
-    st.textContent = `.ycps-hide{display:none!important}`;
-    document.head.appendChild(st);
-  }
-
-  // Hide helper with overlay log
-  function hide(btn){
-    if (!btn) return;
-    btn.classList.add('ycps-hide');
-    btn.style.setProperty('display','none','important'); // beats Tailwind flex/etc
-    btn.setAttribute('aria-expanded','true');
-  }
-
-  // Bind per-button listeners (with outline + attach log)
-  function bind(btn){
-    if (!btn || btn.__ycpsBoundOverlay) return;
-    btn.__ycpsBoundOverlay = true;
-
-    // Visual: outline so you know which buttons are targeted
-    btn.style.outline = '2px solid #00aaff';
-
-    // Let the page open the dropdown, then hide the "+"
-    btn.addEventListener('click', () => {
-      requestAnimationFrame(() => hide(btn));
-    }, false);
-
-    // Backup: if click is swallowed / async render, hide shortly after pointerdown
-    btn.addEventListener('pointerdown', () => {
-      setTimeout(() => hide(btn), 120);
-    }, true);
-  }
-
-  // Bind current buttons
-  const initial = Array.from(document.querySelectorAll(BTN_SEL));
-  initial.forEach(bind);
-
-  // Bind future buttons (re-renders, pagination, etc.)
-  const mo = new MutationObserver(muts => {
-    muts.forEach(m => {
-      m.addedNodes && m.addedNodes.forEach(n => {
-        if (n.nodeType !== 1) return;
-        if (n.matches?.(BTN_SEL)) bind(n);
-        n.querySelectorAll?.(BTN_SEL).forEach(bind);
-      });
-    });
-  });
-  mo.observe(document.body, { childList:true, subtree:true });
-
-  // Delegation fallback (fires even if a new button slipped past observer)
-  document.addEventListener('click', (e)=>{
-    const b = e.target.closest && e.target.closest(BTN_SEL);
-    if (!b) return;
-    // ensure it's bound at first use
-    bind(b);
-  }, true);
-
-})();
-
-window.__ycps_file_ver = 'v11';
-
-// --- YCPS: hide the clicked "+" after dropdown opens (clean, no logs) ---
-(function(){
-  if (window.__ycps_bb_clean) return;
-  window.__ycps_bb_clean = true;
-
-  if (!document.getElementById('ycps-hide-style')) {
-    const st = document.createElement('style');
-    st.id = 'ycps-hide-style';
-    st.textContent = '.ycps-hide{display:none!important}';
-    document.head.appendChild(st);
-  }
-
-  const BTN = 'button.ycps';
-  const afterApp = fn => requestAnimationFrame(() => setTimeout(fn, 60));
-  const hide = (btn) => {
-    if (!btn) return;
-    btn.classList.add('ycps-hide');
-    btn.style.setProperty('display','none','important');
-    btn.setAttribute('aria-expanded','true');
-  };
-
-  document.addEventListener('click', (e) => {
-    const b = e.target.closest && e.target.closest(BTN);
-    if (!b) return;
-    afterApp(() => {
-      hide(b);
-      const mo = new MutationObserver(() => hide(b));
-      mo.observe(document.body, { childList:true, subtree:true, attributes:true, attributeFilter:['class','style'] });
-      setTimeout(() => mo.disconnect(), 1500);
-    });
-  }, false);
-
-  document.addEventListener('pointerdown', (e) => {
-    const b = e.target.closest && e.target.closest(BTN);
-    if (!b) return;
-    setTimeout(() => hide(b), 120);
-  }, true);
-})();
-
-// ===== YCPS FILE LIVE v9 =====
-window.__ycps_file_ver = 'v9';
-
-// --- YCPS: hide the clicked "+" after dropdown opens (clean, no logs) ---
-(function(){
-  if (window.__ycps_file_v9) return;   // guard so we don't double-bind
-  window.__ycps_file_v9 = true;
-
-  // Ensure a CSS rule that always wins
-  if (!document.getElementById('ycps-hide-style')) {
-    const st = document.createElement('style');
-    st.id = 'ycps-hide-style';
-    st.textContent = '.ycps-hide{display:none!important}';
-    document.head.appendChild(st);
-  }
-
-  const BTN = 'button.ycps';
-  const afterApp = fn => requestAnimationFrame(() => setTimeout(fn, 60));
-
-  const hide = (btn) => {
-    if (!btn) return;
-    btn.classList.add('ycps-hide');
-    btn.style.setProperty('display','none','important'); // beats Tailwind flex/etc
-    btn.setAttribute('aria-expanded','true');
-  };
-
-  // Let the page open the list first, then hide the "+"
-  document.addEventListener('click', (e) => {
-    const b = e.target.closest && e.target.closest(BTN);
-    if (!b) return;
-
-    afterApp(() => {
-      hide(b);
-
-      // If the card re-renders right after, keep it hidden briefly
-      const mo = new MutationObserver(() => hide(b));
-      mo.observe(document.body, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: ['class','style']
-      });
-      setTimeout(() => mo.disconnect(), 1500);
-    });
-  }, false);
-
-  // Backup: if click gets swallowed, hide shortly after pointerdown (still non-blocking)
-  document.addEventListener('pointerdown', (e) => {
-    const b = e.target.closest && e.target.closest(BTN);
-    if (!b) return;
-    setTimeout(() => hide(b), 120);
-  }, true);
-})();
-
-// Rating gate: grey unfilled stars for non-purchasers (+ tooltip), and block disallowed clicks.
-(() => {
-  if (window.__rating_gate_installed) return;
-  window.__rating_gate_installed = true;
-
-  const ensureStyles = () => {
-    if (document.getElementById("rating-gate-style")) return;
-    const st = document.createElement("style");
-    st.id = "rating-gate-style";
-    st.textContent = `
-      .rate-wrap{position:relative}
-      .rate-disabled svg, .rate-disabled svg *{ fill:none!important; stroke:#9CA3AF!important; opacity:.8; }
-      .rate-tip{ position:absolute; left:50%; top:-1.25rem; transform:translate(-50%,-6px);
-        background:rgba(17,24,39,.92); color:#fff; padding:4px 8px; border-radius:6px;
-        font-size:12px; white-space:nowrap; pointer-events:none; opacity:0;
-        transition:opacity .15s ease, transform .15s ease; }
-      .rate-tip.show{ opacity:1; transform:translate(-50%,-10px); }
-    `;
-    document.head.appendChild(st);
-  };
-
-  const wrapOf  = b => b.closest(".rate-wrap") || b.parentElement;
-  const canRate = w => (w?.dataset?.canRate === "1");
-  const userStars = w => parseInt(w?.dataset?.userStars || "0", 10);
-  const starVal = b => parseInt(b.dataset.stars || "0", 10);
-  const tipFor = w => {
-    let t = w.querySelector(".rate-tip");
-    if (!t){ t=document.createElement("div"); t.className="rate-tip";
-             t.textContent="Rating a product requires purchase."; w.appendChild(t); }
-    return t;
-  };
-
-  const paintWrap = (wrap) => {
-    if (!wrap) return;
-    const allow = canRate(wrap), you = userStars(wrap);
-    wrap.querySelectorAll(".rate-btn").forEach(btn => {
-      const k = starVal(btn);
-      if (!allow && k > you) {
-        if (!btn.classList.contains("rate-disabled")) {
-          btn.classList.add("rate-disabled");
-          if (!btn.__rgBound) {
-            btn.__rgBound = true;
-            const show = ()=> tipFor(wrap).classList.add("show");
-            const hide = ()=> tipFor(wrap).classList.remove("show");
-            btn.addEventListener("mouseenter", show);
-            btn.addEventListener("mouseleave", hide);
-            btn.addEventListener("click", () => { show(); setTimeout(hide, 900); });
-          }
-        }
-      } else {
-        btn.classList.remove("rate-disabled");
-      }
-    });
-  };
-
-  const paintAll = () => document.querySelectorAll(".rate-wrap").forEach(paintWrap);
-
-  const install = () => {
-    ensureStyles();
-    paintAll();
-
-    // Keep painted if DOM re-renders
-    const mo = new MutationObserver(muts => {
-      muts.forEach(m => {
-        m.addedNodes?.forEach(n => {
-          if (n.nodeType !== 1) return;
-          if (n.matches?.(".rate-wrap")) paintWrap(n);
-          n.querySelectorAll?.(".rate-wrap").forEach(paintWrap);
-        });
-      });
-    });
-    mo.observe(document.body, { childList: true, subtree: true });
-
-    // HARD GUARD: block disallowed rating clicks before any POST happens
-    document.addEventListener("click", (evt) => {
-      const btn = evt.target.closest?.(".rate-btn");
-      if (!btn) return;
-      const w = wrapOf(btn);
-      if (!w) return;
-      if (!canRate(w) && starVal(btn) > userStars(w)) {
-        evt.preventDefault();
-        evt.stopImmediatePropagation();
-        const t = tipFor(w); t.classList.add("show"); setTimeout(()=>t.classList.remove("show"), 900);
-      }
-    }, true);
-
-    window.__rg_repaint = paintAll;
-  };
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", install);
-  } else {
-    install();
-  }
-})();
-
-// tripwire so we can prove THIS gate ran
-window.__rating_gate_file_ver = "gate-in-fp-v1";
-
-// Rating gate: grey unfilled stars for non-purchasers (robust + observer)
-(() => {
-  if (window.__rating_gate_installed) return;
-  window.__rating_gate_installed = true;
-
-  const ensureStyles = () => {
-    if (document.getElementById("rating-gate-style")) return;
-    const st = document.createElement("style");
-    st.id = "rating-gate-style";
-    st.textContent = `
-      .rate-wrap{position:relative}
-      .rate-disabled svg, .rate-disabled svg *{ fill:none!important; stroke:#9CA3AF!important; opacity:.8; }
-      .rate-tip{ position:absolute; left:50%; top:-1.25rem; transform:translate(-50%,-6px);
-        background:rgba(17,24,39,.92); color:#fff; padding:4px 8px; border-radius:6px;
-        font-size:12px; white-space:nowrap; pointer-events:none; opacity:0;
-        transition:opacity .15s ease, transform .15s ease; }
-      .rate-tip.show{ opacity:1; transform:translate(-50%,-10px); }
-    `;
-    document.head.appendChild(st);
-  };
-
-  const wrapOf  = b => b.closest(".rate-wrap") || b.parentElement;
-  const canRate = w => (w?.dataset?.canRate === "1");
-  const userStars = w => parseInt(w?.dataset?.userStars || "0", 10);
-  const starVal = b => parseInt(b.dataset.stars || "0", 10);
-  const tipFor = w => {
-    let t = w.querySelector(".rate-tip");
-    if (!t){ t=document.createElement("div"); t.className="rate-tip";
-             t.textContent="Rating a product requires purchase."; w.appendChild(t); }
-    return t;
-  };
-
-  const paintWrap = (wrap) => {
-    const allow = canRate(wrap), you = userStars(wrap);
-    wrap.querySelectorAll(".rate-btn").forEach(btn => {
-      const k = starVal(btn);
-      if (!allow && k > you) {
-        if (!btn.classList.contains("rate-disabled")) {
-          btn.classList.add("rate-disabled");
-          if (!btn.__rgBound) {
-            btn.__rgBound = true;
-            const show = ()=> tipFor(wrap).classList.add("show");
-            const hide = ()=> tipFor(wrap).classList.remove("show");
-            btn.addEventListener("mouseenter", show);
-            btn.addEventListener("mouseleave", hide);
-            btn.addEventListener("click", () => { show(); setTimeout(hide, 900); });
-          }
-        }
-      } else {
-        btn.classList.remove("rate-disabled");
-      }
-    });
-  };
-
-  const paintAll = () => document.querySelectorAll(".rate-wrap").forEach(paintWrap);
-
-  const install = () => {
-    ensureStyles();
-    paintAll();
-
-    // keep painted on re-renders
-    new MutationObserver(muts => {
-      muts.forEach(m => m.addedNodes?.forEach(n => {
-        if (n.nodeType !== 1) return;
-        if (n.matches?.(".rate-wrap")) paintWrap(n);
-        n.querySelectorAll?.(".rate-wrap").forEach(paintWrap);
-      }));
-    }).observe(document.body, { childList: true, subtree: true });
-
-    // block disallowed POSTs before other handlers
-    document.addEventListener("click", (evt) => {
-      const btn = evt.target.closest?.(".rate-btn");
-      if (!btn) return;
-      const w = wrapOf(btn);
-      if (!w) return;
-      if (!canRate(w) && starVal(btn) > userStars(w)) {
-        evt.preventDefault();
-        evt.stopImmediatePropagation();
-        const t = tipFor(w); t.classList.add("show"); setTimeout(()=>t.classList.remove("show"), 900);
-      }
-    }, true);
-
-    // helper if you need to repaint via console
-    window.__rg_repaint = paintAll;
-  };
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", install);
-  } else {
-    install();
-  }
-})();

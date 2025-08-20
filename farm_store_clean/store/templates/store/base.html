@@ -5,69 +5,27 @@
   <meta charset="utf-8">
   <title>Farm Store</title>
   <link rel="stylesheet" href="{% static 'css/tailwind.min.css' %}">
-
   <!-- FIXED_PILL_CSS_LOADED -->
 <style id="fixed-pill-inline-css">
-/* Fixed-size yellow stepper pill (no forced display) */
 .weight-stepper.fixed-pill,
 .count-stepper.fixed-pill,
 .stepper.fixed-pill {
   width: 176px !important;
   height: 36px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
   border-radius: 9999px !important;
   padding: 0 8px !important;
-  /* don’t force display:flex — let hidden win */
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
 }
-
-/* Hidden must always win */
-.hidden.stepper,
-.hidden.weight-stepper,
-.hidden.count-stepper,
-.fixed-pill.hidden {
-  display: none !important;
+.fixed-pill .btn-dec, .fixed-pill .btn-inc, .fixed-pill .wdec, .fixed-pill .winc {
+  width: 32px !important; flex: 0 0 32px !important; text-align: center !important;
 }
-
-/* Fixed button/caret slots */
-.fixed-pill .btn-dec,
-.fixed-pill .btn-inc,
-.fixed-pill .wdec,
-.fixed-pill .winc {
-  width: 32px !important;
-  flex: 0 0 32px !important;
-  text-align: center !important;
-}
-
-.fixed-pill .wcaret {
-  width: 20px !important;
-  flex: 0 0 20px !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-}
-
-/* Center region flexes but stays centered */
-.fixed-pill .pill-center {
-  flex: 1 1 auto !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  gap: 4px !important;
-  white-space: nowrap !important;
-}
-
-/* Use tabular numbers to avoid jitter */
-.fixed-pill .stepper-count,
-.fixed-pill .wqty {
-  font-variant-numeric: tabular-nums;
-  min-width: 2ch;
-  text-align: center;
-}
+.fixed-pill .wcaret { width: 20px !important; flex: 0 0 20px !important; display:flex !important; align-items:center !important; justify-content:center !important; }
+.fixed-pill .pill-center { flex:1 1 auto !important; display:flex !important; align-items:center !important; justify-content:center !important; gap:4px !important; white-space:nowrap !important; }
+.fixed-pill .stepper-count, .fixed-pill .wqty { font-variant-numeric: tabular-nums; min-width: 2ch; text-align: center; }
 </style>
-
-<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
 <body class="bg-gray-100">
 
