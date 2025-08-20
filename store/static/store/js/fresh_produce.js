@@ -8,7 +8,14 @@ function postUpdateQty(url,qty){
   const data=new FormData(); data.append('qty',String(qty));
   return fetch(url,{ method:'POST', headers:{'X-CSRFToken':getCSRF(),'X-Requested-With':'XMLHttpRequest'}, body:data }).then(r=>r.json());
 }
-
+// Visually disable/enable a button
+function setDisabled(el, on){
+  if(!el) return;
+  el.toggleAttribute('disabled', !!on);
+  el.setAttribute('aria-disabled', on ? 'true' : 'false');
+  el.classList.toggle('opacity-50', !!on);
+  el.classList.toggle('cursor-not-allowed', !!on);
+}
 // Small helpers to manage YCPS visibility robustly
 function showYCPS(btn){
   if(!btn) return;
@@ -205,6 +212,10 @@ window.addEventListener('DOMContentLoaded', () => {
           confirm?.classList.add('hidden');
         }
       }
+        // NEW: Disable the weight stepper "+" when nothing remains
+       if (unit !== 'ea') {
+          setDisabled(winc, remaining() <= 0);
+        }
       if(remaining() <= 0 && inCart <= 0){
         form.remove();
         const out = document.createElement('p'); out.className = 'text-red-600 font-semibold mt-3'; out.innerText = 'Out of stock';
@@ -227,7 +238,7 @@ window.addEventListener('DOMContentLoaded', () => {
       if(!panel || !confirm) return;
       panel.innerHTML = '';
       const {step, hard} = stepInfo();
-      const end = Math.min(stock, hard);
+      const end = Math.min(remaining(), hard);
       if(end <= 0){ panel.classList.add('hidden'); return; }
 
       for(let q=step; q<=end + 1e-9; q=Math.round((q+step)*1000)/1000){
@@ -312,11 +323,12 @@ window.addEventListener('DOMContentLoaded', () => {
     });
 
     winc?.addEventListener('click', ()=>{
-      const target = Math.min(stock, inCart + weightStep());
-      if(target===inCart) return;
-      postUpdateQty(url, target).then(js=>{ if(js?.ok) applyServer(target, js); });
-    });
-    wdec?.addEventListener('click', ()=>{
+    if (winc?.disabled) return;  // NEW: do nothing if disabled
+    const target = Math.min(stock, inCart + weightStep());
+    if(target===inCart) return;
+    postUpdateQty(url, target).then(js=>{ if(js?.ok) applyServer(target, js); });
+  });
+wdec?.addEventListener('click', ()=>{
       const target = Math.max(0, inCart - weightStep());
       postUpdateQty(url, target).then(js=>{ if(js?.ok) applyServer(target, js); });
     });
