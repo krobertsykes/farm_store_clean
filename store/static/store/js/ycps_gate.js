@@ -1,7 +1,6 @@
 // === ycps_gate tripwire (proves THIS file executed) ===
 window.__ycps_ping = (window.__ycps_ping || 0) + 1;
 window.__rating_gate_file_ver = "gate-v2";
-console.log("[ycps_gate] LOADED ping=", window.__ycps_ping, "ver=", window.__rating_gate_file_ver);
 
 /* =========================
    YCPS: hide the clicked "+" after dropdown opens (guarded)

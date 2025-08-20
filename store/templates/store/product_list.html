@@ -14,16 +14,14 @@
         <span class="text-gray-400 cursor-not-allowed">Show out-of-stock</span>
       {% endif %}
     {% else %}
-      <a href="{% url 'store:catalogue' %}?oos=0{% if show_fav %}&fav=1{% endif %}" class="text-blue-600 underline">Hide out-of-stock</a>
+      <a href="?{% if q %}q={{ q|urlencode }}&{% endif %}{% if show_fav %}fav=1&{% endif %}oos=0" class="text-sm underline text-gray-700">Hide out-of-stock</a>
     {% endif %}
 
-    {# Favorites toggle (only useful if signed in) #}
-    {% if user.is_authenticated %}
-      {% if show_fav %}
-        <a href="{% url 'store:catalogue' %}?oos={% if show_oos %}1{% else %}0{% endif %}&fav=0" class="text-blue-600 underline">Hide favorites</a>
-      {% else %}
-        <a href="{% url 'store:catalogue' %}?oos={% if show_oos %}1{% else %}0{% endif %}&fav=1" class="text-blue-600 underline">Show favorites</a>
-      {% endif %}
+    {# Favorites filter toggle #}
+    {% if show_fav %}
+      <a href="?{% if q %}q={{ q|urlencode }}&{% endif %}{% if show_oos %}oos=1&{% endif %}" class="text-sm underline text-gray-700">Show all</a>
+    {% else %}
+      <a href="?{% if q %}q={{ q|urlencode }}&{% endif %}{% if show_oos %}oos=1&{% endif %}fav=1" class="text-sm underline text-gray-700">Only favorites</a>
     {% endif %}
   </div>
 </div>
@@ -48,6 +46,29 @@
 
 {# IMPORTANT: Load behavior JS INSIDE this content block so it actually renders #}
 {% load static %}
-<script src="{% static 'store/js/fresh_produce.js' %}?v=ycps-v11" defer></script>
-<script src="{% static 'store/js/ycps_hide.js' %}?v=1" defer></script>
+<script src="{% static 'store/js/fresh_produce.js' %}" defer></script>
+<script src="{% static 'store/js/ycps_gate.js' %}" defer></script>
+<script src="{% static 'store/js/rating_gate.js' %}" defer></script>
+
+<script>
+/*
+  Fallback repaint in case defer/ordering timing delays the external gate binding.
+  This does nothing harmful if the external file already bound handlers.
+*/
+(function(){
+  if (window.__rating_gate_file_ver) {
+    console.log('[rating_gate] version detected:', window.__rating_gate_file_ver);
+    if (typeof window.__rg_repaint === 'function') window.__rg_repaint();
+    return;
+  }
+  // If the external file hasn’t executed yet, wait for DOM, then try repaint soon after.
+  document.addEventListener('DOMContentLoaded', function(){
+    setTimeout(function(){
+      console.log('[rating_gate] inline fallback firing (no version detected)');
+      if (typeof window.__rg_repaint === 'function') window.__rg_repaint();
+    }, 0);
+  });
+})();
+</script>
+
 {% endblock %}

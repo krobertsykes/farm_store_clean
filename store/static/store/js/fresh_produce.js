@@ -11,7 +11,6 @@ function postUpdateQty(url,qty){
 
 window.addEventListener('DOMContentLoaded', () => {
   // Sanity check: open your browser console and you should see this once.
-  console.log('fresh_produce.js loaded, DOM ready');
 
   // --- favorites ---
   document.querySelectorAll('.fav-btn').forEach(btn=>{
@@ -539,7 +538,6 @@ window.addEventListener('DOMContentLoaded', () => {
   // Hide helper with overlay log
   function hide(btn){
     if (!btn) return;
-    console.log('[YCPS] HIDE →', btn);    // hover log to see page overlay
     btn.classList.add('ycps-hide');
     btn.style.setProperty('display','none','important'); // beats Tailwind flex/etc
     btn.setAttribute('aria-expanded','true');
@@ -552,7 +550,6 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // Visual: outline so you know which buttons are targeted
     btn.style.outline = '2px solid #00aaff';
-    console.log('[YCPS] ATTACH →', btn);  // hover log to highlight on page
 
     // Let the page open the dropdown, then hide the "+"
     btn.addEventListener('click', () => {
@@ -567,7 +564,6 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // Bind current buttons
   const initial = Array.from(document.querySelectorAll(BTN_SEL));
-  console.log(`[YCPS] INIT: found ${initial.length} ycps button(s)`, initial);
   initial.forEach(bind);
 
   // Bind future buttons (re-renders, pagination, etc.)
@@ -590,10 +586,8 @@ window.addEventListener('DOMContentLoaded', () => {
     bind(b);
   }, true);
 
-  console.log('[YCPS] Diagnostic black box (overlay+logs) installed');
 })();
 
-console.log('%c YCPS FILE LIVE v11','background:#222;color:#0f0;padding:2px 4px');
 window.__ycps_file_ver = 'v11';
 
 // --- YCPS: hide the clicked "+" after dropdown opens (clean, no logs) ---
@@ -636,7 +630,6 @@ window.__ycps_file_ver = 'v11';
 })();
 
 // ===== YCPS FILE LIVE v9 =====
-console.log('%c YCPS FILE LIVE v9','background:#222;color:#0f0;padding:2px 4px');
 window.__ycps_file_ver = 'v9';
 
 // --- YCPS: hide the clicked "+" after dropdown opens (clean, no logs) ---
