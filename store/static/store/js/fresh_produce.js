@@ -37,7 +37,57 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 
   // --- ratings ---
+  // Inject minimal styles for disabled stars & tooltip
+  (function ensureRatingStyles(){
+    if (document.getElementById('rating-gate-style')) return;
+    const st = document.createElement('style');
+    st.id = 'rating-gate-style';
+    st.textContent = `
+      .rate-wrap{ position: relative; }
+      .rate-wrap .rate-disabled svg{ stroke:#9CA3AF !important; fill:none !important; opacity:0.8; }
+      .rate-tip{ position:absolute; left:50%; transform:translate(-50%,-6px); top:-1.25rem;
+                 background:rgba(17,24,39,0.92); color:#fff; padding:4px 8px; border-radius:6px;
+                 font-size:12px; line-height:1; white-space:nowrap; pointer-events:none;
+                 opacity:0; transition:opacity .15s ease, transform .15s ease; }
+      .rate-tip.show{ opacity:1; transform:translate(-50%,-10px); }
+    `;
+    document.head.appendChild(st);
+  })();
+
+  function getTip(wrap){
+    let tip = wrap.querySelector('.rate-tip');
+    if(!tip){
+      tip = document.createElement('div');
+      tip.className = 'rate-tip';
+      tip.textContent = 'Rating a product requires purchase.';
+      wrap.appendChild(tip);
+    }
+    return tip;
+  }
+
   document.querySelectorAll('.rate-btn').forEach(btn=>{
+    const wrap = btn.closest('.rate-wrap') || btn.parentElement;
+    const canRate = wrap?.dataset?.canRate === '1';
+    const userStars = parseInt(wrap?.dataset?.userStars||'0',10);
+    const k = parseInt(btn.dataset.stars||'0',10);
+    const svg = btn.querySelector('svg');
+
+    // If user cannot rate and this star is above current userStars, grey it and show tip on hover/click
+    if(!canRate && k > userStars){
+      btn.classList.add('rate-disabled');
+      if(svg){
+        svg.setAttribute('fill','none');
+        svg.setAttribute('stroke','#9CA3AF');
+      }
+      const show = ()=>{ const tip=getTip(wrap); tip.classList.add('show'); };
+      const hide = ()=>{ const tip=getTip(wrap); tip.classList.remove('show'); };
+      btn.addEventListener('mouseenter', show);
+      btn.addEventListener('mouseleave', hide);
+      btn.addEventListener('click', (e)=>{ e.preventDefault(); e.stopPropagation(); const tip=getTip(wrap); tip.classList.add('show'); setTimeout(()=>tip.classList.remove('show'), 900); });
+      return; // do not bind real rating handler
+    }
+
+    // Real rating handler
     btn.addEventListener('click', ()=>{
       const pid = btn.dataset.pid, stars = btn.dataset.stars;
       fetch(`/product/${pid}/rate/`, {
@@ -53,7 +103,9 @@ window.addEventListener('DOMContentLoaded', () => {
           const svg = b.querySelector('svg');
           if(k <= parseInt(stars,10)){
             svg.setAttribute('fill','#F59E0B'); svg.setAttribute('stroke','none');
+            b.classList.remove('rate-disabled');
           }else{
+            // For remaining unfilled stars, keep stroke gold for raters
             svg.setAttribute('fill','none'); svg.setAttribute('stroke','#F59E0B');
           }
         });
@@ -66,7 +118,7 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // --- cart / YCPS / weight list behaviors ---
+// --- cart / YCPS / weight list behaviors ---
   document.querySelectorAll('.add-form').forEach(form=>{
     const pid   = form.dataset.pid;
     const unit  = (form.dataset.unit || '').trim().toLowerCase();  // normalize
@@ -636,4 +688,196 @@ window.__ycps_file_ver = 'v9';
     if (!b) return;
     setTimeout(() => hide(b), 120);
   }, true);
+})();
+
+// Rating gate: grey unfilled stars for non-purchasers (+ tooltip), and block disallowed clicks.
+(() => {
+  if (window.__rating_gate_installed) return;
+  window.__rating_gate_installed = true;
+
+  const ensureStyles = () => {
+    if (document.getElementById("rating-gate-style")) return;
+    const st = document.createElement("style");
+    st.id = "rating-gate-style";
+    st.textContent = `
+      .rate-wrap{position:relative}
+      .rate-disabled svg, .rate-disabled svg *{ fill:none!important; stroke:#9CA3AF!important; opacity:.8; }
+      .rate-tip{ position:absolute; left:50%; top:-1.25rem; transform:translate(-50%,-6px);
+        background:rgba(17,24,39,.92); color:#fff; padding:4px 8px; border-radius:6px;
+        font-size:12px; white-space:nowrap; pointer-events:none; opacity:0;
+        transition:opacity .15s ease, transform .15s ease; }
+      .rate-tip.show{ opacity:1; transform:translate(-50%,-10px); }
+    `;
+    document.head.appendChild(st);
+  };
+
+  const wrapOf  = b => b.closest(".rate-wrap") || b.parentElement;
+  const canRate = w => (w?.dataset?.canRate === "1");
+  const userStars = w => parseInt(w?.dataset?.userStars || "0", 10);
+  const starVal = b => parseInt(b.dataset.stars || "0", 10);
+  const tipFor = w => {
+    let t = w.querySelector(".rate-tip");
+    if (!t){ t=document.createElement("div"); t.className="rate-tip";
+             t.textContent="Rating a product requires purchase."; w.appendChild(t); }
+    return t;
+  };
+
+  const paintWrap = (wrap) => {
+    if (!wrap) return;
+    const allow = canRate(wrap), you = userStars(wrap);
+    wrap.querySelectorAll(".rate-btn").forEach(btn => {
+      const k = starVal(btn);
+      if (!allow && k > you) {
+        if (!btn.classList.contains("rate-disabled")) {
+          btn.classList.add("rate-disabled");
+          if (!btn.__rgBound) {
+            btn.__rgBound = true;
+            const show = ()=> tipFor(wrap).classList.add("show");
+            const hide = ()=> tipFor(wrap).classList.remove("show");
+            btn.addEventListener("mouseenter", show);
+            btn.addEventListener("mouseleave", hide);
+            btn.addEventListener("click", () => { show(); setTimeout(hide, 900); });
+          }
+        }
+      } else {
+        btn.classList.remove("rate-disabled");
+      }
+    });
+  };
+
+  const paintAll = () => document.querySelectorAll(".rate-wrap").forEach(paintWrap);
+
+  const install = () => {
+    ensureStyles();
+    paintAll();
+
+    // Keep painted if DOM re-renders
+    const mo = new MutationObserver(muts => {
+      muts.forEach(m => {
+        m.addedNodes?.forEach(n => {
+          if (n.nodeType !== 1) return;
+          if (n.matches?.(".rate-wrap")) paintWrap(n);
+          n.querySelectorAll?.(".rate-wrap").forEach(paintWrap);
+        });
+      });
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+
+    // HARD GUARD: block disallowed rating clicks before any POST happens
+    document.addEventListener("click", (evt) => {
+      const btn = evt.target.closest?.(".rate-btn");
+      if (!btn) return;
+      const w = wrapOf(btn);
+      if (!w) return;
+      if (!canRate(w) && starVal(btn) > userStars(w)) {
+        evt.preventDefault();
+        evt.stopImmediatePropagation();
+        const t = tipFor(w); t.classList.add("show"); setTimeout(()=>t.classList.remove("show"), 900);
+      }
+    }, true);
+
+    window.__rg_repaint = paintAll;
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", install);
+  } else {
+    install();
+  }
+})();
+
+// tripwire so we can prove THIS gate ran
+window.__rating_gate_file_ver = "gate-in-fp-v1";
+
+// Rating gate: grey unfilled stars for non-purchasers (robust + observer)
+(() => {
+  if (window.__rating_gate_installed) return;
+  window.__rating_gate_installed = true;
+
+  const ensureStyles = () => {
+    if (document.getElementById("rating-gate-style")) return;
+    const st = document.createElement("style");
+    st.id = "rating-gate-style";
+    st.textContent = `
+      .rate-wrap{position:relative}
+      .rate-disabled svg, .rate-disabled svg *{ fill:none!important; stroke:#9CA3AF!important; opacity:.8; }
+      .rate-tip{ position:absolute; left:50%; top:-1.25rem; transform:translate(-50%,-6px);
+        background:rgba(17,24,39,.92); color:#fff; padding:4px 8px; border-radius:6px;
+        font-size:12px; white-space:nowrap; pointer-events:none; opacity:0;
+        transition:opacity .15s ease, transform .15s ease; }
+      .rate-tip.show{ opacity:1; transform:translate(-50%,-10px); }
+    `;
+    document.head.appendChild(st);
+  };
+
+  const wrapOf  = b => b.closest(".rate-wrap") || b.parentElement;
+  const canRate = w => (w?.dataset?.canRate === "1");
+  const userStars = w => parseInt(w?.dataset?.userStars || "0", 10);
+  const starVal = b => parseInt(b.dataset.stars || "0", 10);
+  const tipFor = w => {
+    let t = w.querySelector(".rate-tip");
+    if (!t){ t=document.createElement("div"); t.className="rate-tip";
+             t.textContent="Rating a product requires purchase."; w.appendChild(t); }
+    return t;
+  };
+
+  const paintWrap = (wrap) => {
+    const allow = canRate(wrap), you = userStars(wrap);
+    wrap.querySelectorAll(".rate-btn").forEach(btn => {
+      const k = starVal(btn);
+      if (!allow && k > you) {
+        if (!btn.classList.contains("rate-disabled")) {
+          btn.classList.add("rate-disabled");
+          if (!btn.__rgBound) {
+            btn.__rgBound = true;
+            const show = ()=> tipFor(wrap).classList.add("show");
+            const hide = ()=> tipFor(wrap).classList.remove("show");
+            btn.addEventListener("mouseenter", show);
+            btn.addEventListener("mouseleave", hide);
+            btn.addEventListener("click", () => { show(); setTimeout(hide, 900); });
+          }
+        }
+      } else {
+        btn.classList.remove("rate-disabled");
+      }
+    });
+  };
+
+  const paintAll = () => document.querySelectorAll(".rate-wrap").forEach(paintWrap);
+
+  const install = () => {
+    ensureStyles();
+    paintAll();
+
+    // keep painted on re-renders
+    new MutationObserver(muts => {
+      muts.forEach(m => m.addedNodes?.forEach(n => {
+        if (n.nodeType !== 1) return;
+        if (n.matches?.(".rate-wrap")) paintWrap(n);
+        n.querySelectorAll?.(".rate-wrap").forEach(paintWrap);
+      }));
+    }).observe(document.body, { childList: true, subtree: true });
+
+    // block disallowed POSTs before other handlers
+    document.addEventListener("click", (evt) => {
+      const btn = evt.target.closest?.(".rate-btn");
+      if (!btn) return;
+      const w = wrapOf(btn);
+      if (!w) return;
+      if (!canRate(w) && starVal(btn) > userStars(w)) {
+        evt.preventDefault();
+        evt.stopImmediatePropagation();
+        const t = tipFor(w); t.classList.add("show"); setTimeout(()=>t.classList.remove("show"), 900);
+      }
+    }, true);
+
+    // helper if you need to repaint via console
+    window.__rg_repaint = paintAll;
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", install);
+  } else {
+    install();
+  }
 })();

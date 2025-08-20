@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from decimal import Decimal
 from typing import Dict, Any, List, Tuple
+from urllib import request
 
 from django.conf import settings
 from django.contrib import messages  # left here for other pages; not used for coupon flashes
@@ -129,13 +130,33 @@ def catalogue(request: HttpRequest) -> HttpResponse:
             .annotate(stars=Avg("stars"))
         )
         user_map = {r["product_id"]: int(r["stars"]) for r in your_ratings}
-
+    purchased_ids: set[int] = set()
+    if request.user.is_authenticated:
+        purchased_ids = set(
+            OrderItem.objects.filter(order__user=request.user).values_list('product_id', flat=True)
+        )
+    # Has the current user purchased each product?  (needed to gate ratings)
+    purchased_ids = set()
+    if request.user.is_authenticated:
+        purchased_ids = set(
+            OrderItem.objects
+            .filter(order__user=request.user)
+            .values_list("product_id", flat=True)
+        )
     cart = _get_cart(request.session)
     fav_ids = _get_favorites(request.session)
 
     categories_dict: Dict[Any, Dict[str, Any]] = defaultdict(
         lambda: {"name": "", "description": "", "visible_products": []}
     )
+    # Which products has this user purchased? (for rating gate)
+    purchased_ids: set[int] = set()
+    if request.user.is_authenticated:
+        purchased_ids = set(
+            OrderItem.objects
+                .filter(order__user=request.user)
+                .values_list('product_id', flat=True)
+        )
 
     # Build product objects with in_cart/remaining/ratings/favorite flags
     for p in products_qs:
@@ -146,7 +167,10 @@ def catalogue(request: HttpRequest) -> HttpResponse:
         # Default average to 5.0 when no ratings
         setattr(p, "avg_stars", Decimal(str(avg_map.get(p.id, 5))))
         setattr(p, "user_stars", user_map.get(p.id, 0))
+        setattr(p, "user_can_rate", p.id in purchased_ids)
+        setattr(p, "user_can_rate", p.id in purchased_ids)
         setattr(p, "is_favorite", pid in fav_ids)
+        setattr(p, "user_can_rate", (p.id in purchased_ids))
 
         cat = getattr(p, "category", None)
         key = cat.id if cat else 0
@@ -174,6 +198,8 @@ def catalogue(request: HttpRequest) -> HttpResponse:
         Decimal(str(getattr(p, "stock_qty", "0") or "0")) <= 0
         for p in products_qs
     )
+
+
 
     # Drop empty categories after filters
     categories = [c for c in categories_dict.values() if c["visible_products"]]

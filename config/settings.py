@@ -6,8 +6,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # ─── SECURITY ─────────────────────────────────────────────────────────────────
 SECRET_KEY = 'your-secret-key-here'
-DEBUG = True
+DEBUG = os.getenv("DJANGO_DEBUG", "1") != "0"
 ALLOWED_HOSTS = []
+
+if DEBUG:
+    # Let WhiteNoise serve directly from app/static while developing
+    WHITENOISE_AUTOREFRESH = True
+    WHITENOISE_USE_FINDERS = True
 
 # ─── APPS & MIDDLEWARE ────────────────────────────────────────────────────────
 INSTALLED_APPS = [
@@ -23,6 +28,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -33,6 +39,18 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'config.urls'
 WSGI_APPLICATION = 'config.wsgi.application'
+
+# Required when DEBUG=False (set this at top level, not inside any function)
+ALLOWED_HOSTS = ["localhost", "127.0.0.1", "[::1]"]  # dev & local prod testing
+# If you later deploy to a real domain:
+# ALLOWED_HOSTS += ["your-domain.com"]
+# CSRF_TRUSTED_ORIGINS = ["https://your-domain.com"]  # only needed when using HTTPS + custom domain
+
+# Use hashed filenames (and gzip) only when DEBUG=False
+if not DEBUG:
+    STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+    # Optional: long cache for hashed assets
+    WHITENOISE_MAX_AGE = 31536000
 
 # ─── TEMPLATES ────────────────────────────────────────────────────────────────
 TEMPLATES = [
@@ -76,6 +94,7 @@ USE_TZ        = True
 
 # ─── STATIC & MEDIA ───────────────────────────────────────────────────────────
 STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [ BASE_DIR / 'static' ]
 
 MEDIA_URL  = '/media/'
