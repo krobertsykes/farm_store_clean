@@ -110,7 +110,7 @@ def catalogue(request: HttpRequest) -> HttpResponse:
     show_oos = request.GET.get("oos") == "1"
     show_fav = request.GET.get("fav") == "1"
 
-    # favorites state exposed to template
+    # Favorites state for header toggle
     fav_ids = _get_favorites(request.session)
     has_favorites = bool(fav_ids)
     fav_count = len(fav_ids)
@@ -555,8 +555,8 @@ def checkout_view(request: HttpRequest) -> HttpResponse:
             # Email (simple)
             try:
                 send_mail(
-                    subject=f"Order #{order.pk} confirmation",
-                    message=f"Thanks for your order #{order.pk}. Total: ${order.total}",
+                    subject=f"Order #{order_display} confirmation",
+                    message=f"Thanks for your order #{order_display}. Total: ${order.total}",
                     from_email=None,
                     recipient_list=[order.email],
                     fail_silently=True,
@@ -564,7 +564,7 @@ def checkout_view(request: HttpRequest) -> HttpResponse:
                 admin_mail = getattr(settings, "ORDER_NOTIFICATION_EMAIL", None) or getattr(settings, "DEFAULT_FROM_EMAIL", None)
                 if admin_mail:
                     send_mail(
-                        subject=f"New order #{order.pk}",
+                        subject=f"New order #{order_display}",
                         message=f"Total: ${order.total}",
                         from_email=None,
                         recipient_list=[admin_mail],
@@ -596,7 +596,8 @@ def checkout_view(request: HttpRequest) -> HttpResponse:
 
 
 def thanks_view(request: HttpRequest, order_id: int) -> HttpResponse:
-    return render(request, "store/thanks.html", {"order_id": order_id})
+    order_display = f"{order_id + 99:04d}"
+    return render(request, "store/thanks.html", {"order_id": order_display})
 
 
 # --- Favorites (session-based) ---
@@ -616,3 +617,15 @@ def toggle_favorite(request: HttpRequest, product_id: int) -> JsonResponse:
         favorited = True
     _set_favorites(request.session, fav_ids)
     return JsonResponse({"ok": True, "favorited": favorited})
+
+from django.http import JsonResponse
+def favorites_count(request: HttpRequest) -> JsonResponse:
+    fav_ids = _get_favorites(request.session)
+    return JsonResponse({"ok": True, "count": len(fav_ids)})
+
+
+def orders_history(request: HttpRequest) -> HttpResponse:
+    if not request.user.is_authenticated:
+        return redirect('login')
+    orders = Order.objects.filter(user=request.user).prefetch_related('items__product')
+    return render(request, 'store/orders.html', {'orders': orders})

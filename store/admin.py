@@ -27,12 +27,55 @@ class OrderItemInline(admin.TabularInline):
 
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
-    list_display = ("id", "user", "email", "created_at", "total")
+    list_display = ("order_number", "customer", "email", "created_at", "total_display")
+    list_display_links = ("order_number",)
     list_filter = ("created_at",)
     search_fields = ("email", "user__email")
-    inlines = [OrderItemInline]
+    readonly_fields = ("customer_display",)
 
+    # Changelist columns
+    def customer(self, obj):
+        return obj.user
+    customer.short_description = "CUSTOMER"
+    customer.admin_order_field = "user"
 
+    def total_display(self, obj):
+        # ensure dollar sign display in list
+        return f"${obj.total}"
+    total_display.short_description = "Total"
+    total_display.admin_order_field = "total"
+
+    # Detail form: show 'Customer' as a readonly field, not the raw FK widget
+    def customer_display(self, obj):
+        return obj.user
+    customer_display.short_description = "Customer"
+
+    def get_fields(self, request, obj=None):
+        fields = list(super().get_fields(request, obj))
+        # Remove id and order_number if present
+        for f in ("id", "order_number"):
+            if f in fields:
+                fields.remove(f)
+        # Replace 'user' with 'customer_display'
+        if "user" in fields:
+            idx = fields.index("user")
+            fields[idx] = "customer_display"
+        else:
+            # make sure customer_display is near top if not present
+            if "customer_display" not in fields:
+                fields.insert(0, "customer_display")
+        return fields
+
+    # Titles
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        extra_context["title"] = "Select order to view details"
+        return super().changelist_view(request, extra_context=extra_context)
+
+    def changeform_view(self, request, object_id=None, form_url='', extra_context=None):
+        extra_context = extra_context or {}
+        extra_context["title"] = "Order Details"
+        return super().changeform_view(request, object_id, form_url, extra_context=extra_context)
 @admin.register(Rating)
 class RatingAdmin(admin.ModelAdmin):
     list_display = ("product", "user", "stars", "created_at")

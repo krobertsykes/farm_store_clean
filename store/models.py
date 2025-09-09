@@ -62,9 +62,14 @@ class Order(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self) -> str:
-        return f"Order #{self.pk}"
+        return f"Order #{self.order_number}"
 
 
+
+
+    @property
+    def order_number(self) -> str:
+        return f"{self.pk + 99:04d}"
 class OrderItem(models.Model):
     from products.models import Product  # local import to avoid circular at module import
 

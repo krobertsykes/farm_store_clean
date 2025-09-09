@@ -6,6 +6,8 @@ from . import views
 app_name = "store"
 
 urlpatterns = [
+    path('orders/', views.orders_history, name='orders'),
+    path("favorites/count/", views.favorites_count, name="favorites_count"),
     path("", views.catalogue, name="catalogue"),
     path("cart/", views.cart_view, name="cart"),
     path("cart/update/<int:product_id>/", views.cart_update_qty, name="update_qty"),

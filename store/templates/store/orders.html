@@ -1,18 +1,47 @@
 {% extends "store/base.html" %}
-{% block title %}Orders{% endblock %}
 {% block content %}
-<h1>Your Orders</h1>
-{% for o in orders %}
-  <div style="margin-bottom:1rem;padding:0.5rem;border:1px solid #ddd">
-    <div><strong>Order #{{ o.id }}</strong> – {{ o.created_at }}</div>
-    <ul>
-      {% for it in o.items.all %}
-        <li>{{ it.name_snapshot }} — {{ it.qty }} {{ it.unit }} @ ${{ it.unit_price }} (=${{ it.line_total }})</li>
-      {% endfor %}
-    </ul>
-    <div>Subtotal: ${{ o.subtotal }} | Discount: ${{ o.discount }} | Total: <strong>${{ o.total }}</strong></div>
+<h1 class="text-2xl font-bold mb-4">Your Orders</h1>
+
+{% if orders %}
+  <div class="space-y-6">
+    {% for order in orders %}
+      <div class="border rounded-lg p-4">
+        <div class="flex justify-between items-center mb-2">
+          <div>
+            <div class="font-semibold">Order #{{ order.pk|add:99|stringformat:"04d" }}</div>
+            <div class="text-sm text-gray-600">{{ order.created_at|date:"M j, Y g:i a" }}</div>
+          </div>
+          <div class="text-right">
+            <div class="font-semibold">${{ order.total }}</div>
+            {% if order.coupon %}<div class="text-xs text-gray-500">Coupon: {{ order.coupon.code }}</div>{% endif %}
+          </div>
+        </div>
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left border-b">
+              <th class="py-1">Item</th>
+              <th class="py-1">Qty</th>
+              <th class="py-1">Unit</th>
+              <th class="py-1">Unit Price</th>
+              <th class="py-1 text-right">Line Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for it in order.items.all %}
+              <tr class="border-b">
+                <td class="py-1">{{ it.product.name }}</td>
+                <td class="py-1">{{ it.qty }}</td>
+                <td class="py-1">{{ it.unit }}</td>
+                <td class="py-1">${{ it.unit_price }}</td>
+                <td class="py-1 text-right">${{ it.line_total }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endfor %}
   </div>
-{% empty %}
-  <p>No orders yet.</p>
-{% endfor %}
+{% else %}
+  <p>You have no past orders.</p>
+{% endif %}
 {% endblock %}

@@ -110,4 +110,4 @@ AUTHENTICATION_BACKENDS = [
 # ─── EMAIL ────────────────────────────────────────────────────────────────────
 EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@farmstore.local")
-ORDER_NOTIFICATION_EMAIL = os.getenv("ORDER_NOTIFICATION_EMAIL", "owner@farmstore.local")
+ORDER_NOTIFICATION_EMAIL = os.getenv("ORDER_NOTIFICATION_EMAIL", "k.robert.sykes@gmail.com")
