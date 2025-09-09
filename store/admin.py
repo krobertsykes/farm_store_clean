@@ -27,6 +27,7 @@ class OrderItemInline(admin.TabularInline):
 
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
+    inlines = [OrderItemInline]
     list_display = ("order_number", "customer", "email", "created_at", "total_display")
     list_display_links = ("order_number",)
     list_filter = ("created_at",)

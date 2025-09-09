@@ -31,41 +31,6 @@ function hideYCPS(btn){
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-  // --- Favorites toggle link state ---
-  const favStateEl = document.getElementById('fav-state');
-  let favCount = 0;
-  if (favStateEl) {
-    const n = parseInt(favStateEl.dataset.count || '0', 10);
-    favCount = isNaN(n) ? 0 : n;
-  }
-  function updateFavToggleLink() {
-    const link = document.getElementById('fav-toggle-link');
-    const disabled = document.getElementById('fav-toggle-disabled');
-    const onFavFilter = new URLSearchParams(location.search).get('fav') === '1';
-    if (onFavFilter) return;
-    if (favCount > 0) {
-      if (!link && disabled) {
-        const a = document.createElement('a');
-        a.id = 'fav-toggle-link';
-        a.textContent = 'Only favorites';
-        a.className = 'text-sm underline text-gray-700';
-        const params = new URLSearchParams(location.search);
-        params.set('fav','1');
-        a.href = `?${params.toString()}`;
-        disabled.replaceWith(a);
-      }
-    } else {
-      if (!disabled && link) {
-        const s = document.createElement('span');
-        s.id = 'fav-toggle-disabled';
-        s.textContent = 'Only favorites';
-        s.className = 'text-sm text-gray-400 cursor-not-allowed';
-        link.replaceWith(s);
-      }
-    }
-  }
-  updateFavToggleLink();
-
   // --- favorites ---
   document.querySelectorAll('.fav-btn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -79,12 +44,6 @@ window.addEventListener('DOMContentLoaded', () => {
           btn.setAttribute('aria-pressed', on ? 'true' : 'false');
           btn.querySelector('.heart-on')?.classList.toggle('hidden', !on);
           btn.querySelector('.heart-off')?.classList.toggle('hidden', on);
-          try {
-            favCount += on ? 1 : -1;
-            if (favCount < 0) favCount = 0;
-            updateFavToggleLink();
-          } catch(e) {}
-
 
           if(!on && new URLSearchParams(location.search).get('fav') === '1'){
             const card = btn.closest('[id^="prod-"]'); card?.classList.add('opacity-50');
@@ -173,6 +132,61 @@ window.addEventListener('DOMContentLoaded', () => {
       }
     }, true);
   })();
+  // --- rating submit (restore click to POST and update UI) ---
+  document.addEventListener('click', (evt) => {
+    const btn = evt.target.closest?.('.rate-btn');
+    if (!btn) return;
+    evt.preventDefault();
+
+    const wrap = btn.closest('.rate-wrap');
+    if (!wrap) return;
+
+    const pid = btn.dataset.pid;
+    const stars = parseInt(btn.dataset.stars || '0', 10);
+    if (!pid || !stars) return;
+
+    // Check gating: if not allowed and trying to increase, show tip and bail
+    const canRate = wrap.dataset.canRate === '1';
+    const current = parseInt(wrap.dataset.userStars || '0', 10);
+    if (!canRate && stars > current) {
+      const tip = wrap.querySelector('.rate-tip') || (()=>{ const t=document.createElement('div'); t.className='rate-tip'; t.textContent='Rating a product requires purchase.'; wrap.appendChild(t); return t; })();
+      tip.classList.add('show'); setTimeout(()=>tip.classList.remove('show'), 900);
+      return;
+    }
+
+    // POST the rating
+    const url = `/product/${pid}/rate/`;
+    const data = new FormData();
+    data.append('stars', String(stars));
+    fetch(url, {
+      method: 'POST',
+      headers: { 'X-CSRFToken': getCSRF(), 'X-Requested-With': 'XMLHttpRequest' },
+      body: data
+    })
+    .then(r => r.json())
+    .then(js => {
+      if (!js || !js.ok) return;
+
+      // Update avg text if present
+      const avgEl = document.querySelector(`.avg-stars[data-pid="${pid}"]`);
+      if (avgEl && typeof js.avg === 'number') {
+        try { avgEl.textContent = (Math.round(js.avg * 10) / 10).toFixed(1); } catch(_) {}
+      }
+
+      // Update local state
+      wrap.dataset.userStars = String(stars);
+
+      // Repaint stars immediately
+      wrap.querySelectorAll('.rate-btn').forEach(b => {
+        const k = parseInt(b.dataset.stars || '0', 10);
+        b.innerHTML = (k <= stars) ? `<svg class="w-5 h-5" viewBox="0 0 20 20" fill="#F59E0B" xmlns="http://www.w3.org/2000/svg"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.802 2.036a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.802-2.036a1 1 0 00-1.176 0l-2.802 2.036c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.462a1 1 0 00.95-.69l1.07-3.292z"/></svg>` : `<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21 12 17.77 5.82 21 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
+        // Update disabled gating visuals
+        if (!canRate && k > stars) b.classList.add('rate-disabled'); else b.classList.remove('rate-disabled');
+      });
+    })
+    .catch(()=>{});
+  });
+  // ---
 
   // --- cart / YCPS / weight list behaviors (clean) ---
   document.querySelectorAll('.add-form').forEach(form=>{
@@ -407,11 +421,10 @@ wdec?.addEventListener('click', ()=>{
       const confirmOpen = confirm && !confirm.classList.contains('hidden');
       if(!listOpen && !confirmOpen) return;
       if(form.contains(ev.target)) return;
+      if(listOpen && panelSticky) return; // keep open until a choice or Esc
       panel?.classList.add('hidden');
       confirm?.classList.add('hidden');
-      panelSticky = false;
-      showYCPS(ycps);
-});
+    });
 
     // Esc always collapses (and clears sticky)
     document.addEventListener('keydown', (e)=>{
@@ -419,7 +432,6 @@ wdec?.addEventListener('click', ()=>{
         if(panel && !panel.classList.contains('hidden')) panel.classList.add('hidden');
         if(confirm && !confirm.classList.contains('hidden')) confirm.classList.add('hidden');
         panelSticky = false;
-        showYCPS(ycps);
       }
     });
 
@@ -482,3 +494,65 @@ wdec?.addEventListener('click', ()=>{
     }
   });
 });
+
+// === rating_submit_fresh (delegated) — post & repaint immediately ===
+(() => {
+  if (window.__rating_submit_fresh_installed) return;
+  window.__rating_submit_fresh_installed = true;
+  console.log("[rating_submit_fresh] installed");
+
+  function getCookie(name) {
+    try {
+      const value = `; ${document.cookie}`;
+      const parts = value.split(`; ${name}=`);
+      if (parts.length === 2) return parts.pop().split(';').shift();
+    } catch(_) {}
+    return '';
+  }
+  function getCSRF() {
+    return getCookie('csrftoken') || document.querySelector('input[name=csrfmiddlewaretoken]')?.value || '';
+  }
+  const FILLED = '<svg class="w-5 h-5" viewBox="0 0 20 20" fill="#F59E0B" xmlns="http://www.w3.org/2000/svg"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.802 2.036a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.802-2.036a1 1 0 00-1.176 0l-2.802 2.036c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.462a1 1 0 00.95-.69l1.07-3.292z"/></svg>';
+  const EMPTY  = '<svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21 12 17.77 5.82 21 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
+
+  document.addEventListener('click', function(evt) {
+    const btn = evt.target.closest && evt.target.closest('.rate-btn');
+    if (!btn) return;
+    evt.preventDefault();
+
+    const wrap = btn.closest('.rate-wrap');
+    if (!wrap) return;
+
+    const pid = btn.dataset.pid;
+    const stars = parseInt(btn.dataset.stars || '0', 10);
+    if (!pid || !stars) return;
+
+    // Submit
+    fetch(`/product/${pid}/rate/`, {
+      method: 'POST',
+      headers: { 'X-CSRFToken': getCSRF(), 'X-Requested-With': 'XMLHttpRequest' },
+      body: (()=>{ const f=new FormData(); f.append('stars', String(stars)); return f; })()
+    })
+    .then(r => r.json())
+    .then(js => {
+      if (!js || !js.ok) { console.warn("[rating_submit_fresh] bad response", js); return; }
+
+      // Update local state and repaint stars
+      wrap.dataset.userStars = String(stars);
+      wrap.querySelectorAll('.rate-btn').forEach(b => {
+        const k = parseInt(b.dataset.stars || '0', 10);
+        b.innerHTML = (k <= stars) ? FILLED : EMPTY;
+      });
+
+      // Update avg if present
+      const avgEl = document.querySelector(`.avg-stars[data-pid="${pid}"]`);
+      if (avgEl && typeof js.avg === 'number') {
+        avgEl.textContent = (Math.round(js.avg * 10) / 10).toFixed(1);
+      }
+      console.log("[rating_submit_fresh] painted", {pid, stars});
+    })
+    .catch(err => console.error("[rating_submit_fresh] error", err));
+  });
+})();
+
+// ===
