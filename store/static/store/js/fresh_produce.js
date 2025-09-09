@@ -271,24 +271,51 @@ window.addEventListener('DOMContentLoaded', () => {
     syncUI();
 
     // YCPS click
-    ycps?.addEventListener('click', e=>{
-      e.preventDefault();
-      e.stopPropagation();
+    // YCPS click
+ycps?.addEventListener('click', e=>{
+  e.preventDefault();
+  e.stopPropagation();
 
-      hideYCPS(ycps); // hide immediately
+  // Hide the YCPS button immediately
+  hideYCPS(ycps);
 
-      if(unit === 'ea'){
-        const target = Math.min(stock, inCart + 1);
-        if(target === inCart){ showYCPS(ycps); return; }
-        stepEl?.classList.remove('hidden');
-        if(countEl) countEl.textContent = String(Math.floor(inCart+1));
-        postUpdateQty(url, target).then(js=>{ if(js?.ok) applyServer(target, js); else showYCPS(ycps); });
-      }else{
-        if (panel && !panel.classList.contains('hidden')) { panelSticky = true; return; }
-        buildAndOpenList(true);
-        wStep?.classList.remove('hidden');
-      }
+  if (unit === 'ea') {
+    // --- EA FLOW (unchanged) ---
+    const target = Math.min(stock, inCart + 1);
+    if (target === inCart) { showYCPS(ycps); return; }
+    stepEl?.classList.remove('hidden');
+    if (countEl) countEl.textContent = String(Math.floor(inCart + 1));
+    postUpdateQty(url, target).then(js => {
+      if (js?.ok) applyServer(target, js);
+      else showYCPS(ycps);
     });
+    return;
+  }
+
+  // --- BY-WEIGHT FLOW ---
+  // If required nodes aren’t in this card, fall back to caret behavior
+  if (!panel || !confirm) {
+    // Some cards may render a compact version; let the caret toggle it
+    wcaret?.click();
+    return;
+  }
+
+  // If the list is already open, mark sticky and exit (don’t re-render)
+  if (!panel.classList.contains('hidden')) {
+    panelSticky = true;
+    return;
+  }
+
+  // Force the exact desired UI state:
+  // 1) open ONLY the list
+  // 2) keep confirm and stepper hidden
+  // 3) mark sticky so outside clicks don’t close it right away
+  buildAndOpenList(true);            // builds options + shows panel, hides confirm inside
+  wStep?.classList.add('hidden');    // keep weight stepper hidden while list is open
+  confirm?.classList.add('hidden');  // ensure confirm is hidden until a weight is picked
+  panel?.classList.remove('hidden'); // make sure list is visible
+});
+
 
     // Each stepper (ea)
     inc?.addEventListener('click', e=>{
