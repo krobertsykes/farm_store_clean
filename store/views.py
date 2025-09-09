@@ -110,6 +110,12 @@ def catalogue(request: HttpRequest) -> HttpResponse:
     show_oos = request.GET.get("oos") == "1"
     show_fav = request.GET.get("fav") == "1"
 
+    # favorites state exposed to template
+    fav_ids = _get_favorites(request.session)
+    has_favorites = bool(fav_ids)
+    fav_count = len(fav_ids)
+
+
     products_qs = Product.objects.all().select_related("category")
 
     # Search filter: name or category name
@@ -213,6 +219,8 @@ def catalogue(request: HttpRequest) -> HttpResponse:
             "has_oos": has_oos,
             "q": q,
             "show_fav": show_fav,
+            "has_favorites": has_favorites,
+            "fav_count": fav_count,
             "cart_item_total": _cart_item_count(cart),  # keep header cart count accurate
         },
     )

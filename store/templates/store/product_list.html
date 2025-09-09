@@ -6,25 +6,39 @@
   <h1 class="text-3xl font-bold">Fresh Produce</h1>
 
   <div class="flex items-center gap-5">
+
     {# OOS toggle #}
-    {% if not show_oos %}
-      {% if has_oos %}
-        <span class="text-gray-400 cursor-not-allowed">Show out-of-stock</span>
-      {% else %}
-        <span class="text-gray-400 cursor-not-allowed">Show out-of-stock</span>
-      {% endif %}
+    {% if show_oos %}
+      <a href="?{% if q %}q={{ q|urlencode }}&{% endif %}{% if show_fav %}fav=1&{% endif %}oos=0"
+         class="text-sm underline text-gray-700">Hide out-of-stock</a>
     {% else %}
-      <a href="?{% if q %}q={{ q|urlencode }}&{% endif %}{% if show_fav %}fav=1&{% endif %}oos=0" class="text-sm underline text-gray-700">Hide out-of-stock</a>
+      {% if has_oos %}
+        <a href="?{% if q %}q={{ q|urlencode }}&{% endif %}{% if show_fav %}fav=1&{% endif %}oos=1"
+           class="text-sm underline text-gray-700">Show out-of-stock</a>
+      {% else %}
+        <span class="text-sm text-gray-400 cursor-not-allowed">Show out-of-stock</span>
+      {% endif %}
     {% endif %}
 
     {# Favorites filter toggle #}
     {% if show_fav %}
-      <a href="?{% if q %}q={{ q|urlencode }}&{% endif %}{% if show_oos %}oos=1&{% endif %}" class="text-sm underline text-gray-700">Show all</a>
+      <a href="?{% if q %}q={{ q|urlencode }}&{% endif %}{% if show_oos %}oos=1&{% endif %}"
+         class="text-sm underline text-gray-700" id="fav-toggle-link">Show all</a>
     {% else %}
-      <a href="?{% if q %}q={{ q|urlencode }}&{% endif %}{% if show_oos %}oos=1&{% endif %}fav=1" class="text-sm underline text-gray-700">Only favorites</a>
+      {% if has_favorites %}
+        <a href="?{% if q %}q={{ q|urlencode }}&{% endif %}{% if show_oos %}oos=1&{% endif %}fav=1"
+           class="text-sm underline text-gray-700" id="fav-toggle-link">Only favorites</a>
+      {% else %}
+        <span class="text-sm text-gray-400 cursor-not-allowed" id="fav-toggle-disabled">Only favorites</span>
+      {% endif %}
     {% endif %}
+
+    {# Hidden seed for JS to read the current favorites count #}
+    <span id="fav-state" data-count="{{ fav_count|default:0 }}" class="hidden"></span>
+
   </div>
 </div>
+
 
 {% for category in categories %}
   <h2 class="text-2xl font-semibold mt-10 mb-4">{{ category.name }}</h2>

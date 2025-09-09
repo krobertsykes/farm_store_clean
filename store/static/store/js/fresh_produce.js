@@ -31,6 +31,48 @@ function hideYCPS(btn){
 }
 
 window.addEventListener('DOMContentLoaded', () => {
+// --- Favorites toggle link state ---
+const favStateEl = document.getElementById('fav-state');
+let favCount = 0;
+if (favStateEl) {
+  const n = parseInt(favStateEl.dataset.count || '0', 10);
+  favCount = isNaN(n) ? 0 : n;
+}
+function updateFavToggleLink() {
+  const link = document.getElementById('fav-toggle-link');
+  const disabled = document.getElementById('fav-toggle-disabled');
+  const onFavFilter = new URLSearchParams(location.search).get('fav') === '1';
+  if (onFavFilter) return;
+
+  if (favCount > 0) {
+    if (!link && disabled) {
+      const a = document.createElement('a');
+      a.id = 'fav-toggle-link';
+      a.textContent = 'Only favorites';
+      a.className = 'text-sm underline text-gray-700';
+      const params = new URLSearchParams(location.search);
+      params.set('fav','1');
+      a.href = `?${params.toString()}`;
+      disabled.replaceWith(a);
+    }
+  } else {
+    if (!disabled && link) {
+      const s = document.createElement('span');
+      s.id = 'fav-toggle-disabled';
+      s.textContent = 'Only favorites';
+      s.className = 'text-sm text-gray-400 cursor-not-allowed';
+      link.replaceWith(s);
+    }
+  }
+}
+document.addEventListener('favorite:toggled', (e) => {
+  const on = !!(e.detail && e.detail.favorited);
+  favCount += on ? 1 : -1;
+  if (favCount < 0) favCount = 0;
+  updateFavToggleLink();
+});
+updateFavToggleLink();
+
   // --- favorites ---
   document.querySelectorAll('.fav-btn').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -44,6 +86,11 @@ window.addEventListener('DOMContentLoaded', () => {
           btn.setAttribute('aria-pressed', on ? 'true' : 'false');
           btn.querySelector('.heart-on')?.classList.toggle('hidden', !on);
           btn.querySelector('.heart-off')?.classList.toggle('hidden', on);
+          
+          // inform header to update immediately
+          document.dispatchEvent(new CustomEvent('favorite:toggled', {
+          detail: { favorited: on }
+        }));
 
           if(!on && new URLSearchParams(location.search).get('fav') === '1'){
             const card = btn.closest('[id^="prod-"]'); card?.classList.add('opacity-50');
