@@ -413,10 +413,11 @@ wdec?.addEventListener('click', ()=>{
       const confirmOpen = confirm && !confirm.classList.contains('hidden');
       if(!listOpen && !confirmOpen) return;
       if(form.contains(ev.target)) return;
-      if(listOpen && panelSticky) return; // keep open until a choice or Esc
       panel?.classList.add('hidden');
       confirm?.classList.add('hidden');
-    });
+      panelSticky = false;
+      showYCPS(ycps);
+});
 
     // Esc always collapses (and clears sticky)
     document.addEventListener('keydown', (e)=>{
@@ -424,6 +425,7 @@ wdec?.addEventListener('click', ()=>{
         if(panel && !panel.classList.contains('hidden')) panel.classList.add('hidden');
         if(confirm && !confirm.classList.contains('hidden')) confirm.classList.add('hidden');
         panelSticky = false;
+        showYCPS(ycps);
       }
     });
 
